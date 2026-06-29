@@ -311,7 +311,11 @@ function getAllKeys(nodes: DataNode[]): string[] {
           }}>{permChecked.length === getAllKeys(permTree).length ? "取消全选" : "全选"}</Button>
         </div>
         <Tree key={permExpandAll ? "e" : "c"} checkable checkStrictly defaultExpandAll={permExpandAll} checkedKeys={permChecked}
-          onCheck={(keys) => setPermChecked(keys as string[])} treeData={permTree}
+          onCheck={(keys) => {
+            // checkStrictly 模式下 onCheck 返回 { checked, halfChecked }，需要提取 checked
+            const rawKeys = Array.isArray(keys) ? keys : keys.checked
+            setPermChecked(rawKeys.map(String))
+          }} treeData={permTree}
           style={{ maxHeight: 400, overflow: 'auto' }} />
       </Modal>
 
