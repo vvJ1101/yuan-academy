@@ -43,13 +43,22 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
 
   const [userPerms, setUserPerms] = useState<string[]>(['*'])
   const [permList, setPermList] = useState<string[]>(['*'])
+  const [folderPerms, setFolderPerms] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.permissions) setUserPerms(u.permissions) }).catch(()=>{})
     fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch(()=>{})
 
     fetch('/api/folders').then(r => r.json()).then(d => {
-      if (d?.folders) setFolders(d.folders)
+      if (d?.folders) {
+        setFolders(d.folders)
+        // 提取每个文件夹的用户权限等级
+        const perms: Record<string, string> = {}
+        for (const f of d.folders) {
+          if (f.userPermission) perms[f.id] = f.userPermission
+        }
+        setFolderPerms(perms)
+      }
       if (d?.storage) setStorage(d.storage)
     }).catch(() => {})
     fetch('/api/companies').then(r => r.json()).then(d => { if (Array.isArray(d)) setCompanies(d) }).catch(() => {})
@@ -59,11 +68,24 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
 
   async function refreshFolders() {
     const r = await fetch('/api/folders').then(r => r.json())
-    if (r?.folders) setFolders(r.folders)
+    if (r?.folders) {
+      setFolders(r.folders)
+      const perms: Record<string, string> = {}
+      for (const f of r.folders) {
+        if (f.userPermission) perms[f.id] = f.userPermission
+      }
+      setFolderPerms(perms)
+    }
   }
 
   function handleNav() { onClose?.() }
   function goToDocuments(spaceId?: string, folderId?: string) {
+    // 检查文件夹权限
+    const targetId = folderId || spaceId
+    if (targetId && folderPerms[targetId] === 'none') {
+      alert('您没有访问该文件夹的权限')
+      return
+    }
     handleNav()
     if (!spaceId) { router.push('/internal/documents'); return }
     const params = new URLSearchParams()
@@ -78,6 +100,19 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
     }
     router.push('/internal/documents?' + params.toString())
   }
+
+// ── 权限标签（显示在每个文件夹旁边）──
+function PermBadge({ perm }: { perm: string }) {
+  const cfg: Record<string, { label: string; cls: string }> = {
+    none:  { label: '无权限', cls: 'text-neutral-300 bg-neutral-50' },
+    view:  { label: '只读', cls: 'text-emerald-600 bg-emerald-50' },
+    edit:  { label: '编辑', cls: 'text-blue-600 bg-blue-50' },
+    delete:{ label: '删除', cls: 'text-orange-600 bg-orange-50' },
+    admin: { label: '管理', cls: 'text-purple-600 bg-purple-50' },
+  }
+  const c = cfg[perm] || cfg.none
+  return <span className={`text-[0.6rem] px-1 py-[1px] rounded font-medium ${c.cls}`}>{c.label}</span>
+}
 
   const isActive = (href: string) => {
     if (href.includes('?')) return pathname === href.split('?')[0]
@@ -224,6 +259,7 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
                       onContextMenu={e => handleCtx(e, { id: s.id, name: s.name, isSpace: true })}
                       className="flex items-center gap-1.5 py-1.5 px-2 ml-4 text-[0.78rem] text-neutral-600 cursor-pointer hover:bg-neutral-50 rounded-md">
                       <Folder size={13} strokeWidth={1.5} className="text-[#2563EB]" />{s.name}
+                      <PermBadge perm={folderPerms[s.id] || 'none'} />
                       {(docCounts.get(s.id) || 0) > 0 && <span className="text-[0.62rem] text-neutral-400 ml-auto">{docCounts.get(s.id)}</span>}
                     </div>
                     {/* Inline create under group space */}
@@ -261,7 +297,7 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
                     <span className="text-[0.62rem] text-neutral-400 ml-auto">{cspaces.reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)}</span>
                   </div>
                   {isOpen && cspaces.map(s => (
-                    <TreeFolder key={s.id} folder={s} depth={1} folders={folders}
+                    <TreeFolder key={s.id} folder={s} folderPerms={folderPerms} depth={1} folders={folders}
                       expanded={expanded} activeId={activeId} docCounts={docCounts}
                       onNavigate={goToDocuments} onToggle={toggle} onSetActive={setActiveId} onCtx={handleCtx}
                       inlineCreate={inlineCreate} inlineName={inlineCreate?.name || ''} inlineSaving={inlineSaving}

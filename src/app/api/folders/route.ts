@@ -3,6 +3,7 @@ import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { getUserAccessibleFolderIds } from '@/lib/permissions/folders'
 import { statSync, readdirSync } from 'fs'
 import { join } from 'path'
+import { getFolderPermission } from '@/lib/permissions/folders'
 
 // GET /api/folders — list folder tree (filtered by user permissions)
 export async function GET(req: NextRequest) {
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   // Other users: only see folders they have permission for (or their company's folders)
   const allowedIds = await getUserAccessibleFolderIds(session)
-  const folders = await prisma.folder.findMany({
+  let folders = await prisma.folder.findMany({
     where: {
       OR: [
         { id: { in: allowedIds } },
@@ -36,6 +37,12 @@ export async function GET(req: NextRequest) {
     orderBy: { sortOrder: 'asc' },
     include: { _count: { select: { documents: true, children: true } } },
   })
+
+  // 为每个文件夹计算用户的实际权限等级
+  folders = await Promise.all(folders.map(async (f) => {
+    const perm = await getFolderPermission(session, f.id)
+    return { ...f, userPermission: perm || 'none' }
+  }))
 
   return NextResponse.json({ folders, storage })
 }

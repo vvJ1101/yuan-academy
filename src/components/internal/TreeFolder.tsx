@@ -3,10 +3,24 @@
 import { useState, useRef } from 'react'
 import { Folder, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 
+/** 权限等级标签 */
+function PermBadge({ perm }: { perm: string }) {
+  const cfg: Record<string, { label: string; cls: string }> = {
+    none:  { label: '无权限', cls: 'text-neutral-300 bg-neutral-50' },
+    view:  { label: '只读', cls: 'text-emerald-600 bg-emerald-50' },
+    edit:  { label: '编辑', cls: 'text-blue-600 bg-blue-50' },
+    delete:{ label: '删除', cls: 'text-orange-600 bg-orange-50' },
+    admin: { label: '管理', cls: 'text-purple-600 bg-purple-50' },
+  }
+  const c = cfg[perm] || cfg.none
+  return <span className={`text-[0.6rem] px-1 py-[1px] rounded font-medium ${c.cls}`}>{c.label}</span>
+}
+
 interface FolderItem { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; _count: { documents: number; children: number } }
 
 interface TreeFolderProps {
   folder: FolderItem
+  folderPerms: Record<string, string>
   depth: number
   folders: FolderItem[]
   expanded: Set<string>
@@ -34,7 +48,7 @@ interface TreeFolderProps {
 }
 
 export function TreeFolder({
-  folder, depth, folders, expanded, activeId, docCounts,
+  folder, folderPerms, depth, folders, expanded, activeId, docCounts,
   onNavigate, onToggle, onSetActive, onCtx,
   inlineCreate, inlineName, inlineSaving, onInlineNameChange, onInlineSave, onInlineKeyDown,
   renamingId, renameValue, renameSaving, onRenameStart, onRenameChange, onRenameSave, onRenameKeyDown,
@@ -46,6 +60,8 @@ export function TreeFolder({
   const isCreatingHere = inlineCreate?.parentId === folder.id
   const isRenaming = renamingId === folder.id
   const renameRef = useRef<HTMLInputElement>(null)
+  const userPerm = folderPerms[folder.id] || 'none'
+  const canAccess = userPerm !== 'none'
 
   // Focus rename input when it appears
   if (isRenaming && renameRef.current) {
@@ -74,13 +90,17 @@ export function TreeFolder({
         </div>
       ) : (
         <div
-          onClick={() => { onSetActive(folder.id); onNavigate(folder.id); if (hasKids) onToggle(folder.id) }}
+          onClick={() => {
+            if (!canAccess) { alert('您没有访问该文件夹的权限'); return }
+            onSetActive(folder.id); onNavigate(folder.id); if (hasKids) onToggle(folder.id)
+          }}
           onContextMenu={e => onCtx(e, { id: folder.id, name: folder.name, isSpace: !folder.parentId })}
-          className={'flex items-center gap-1.5 py-1.5 px-2 ml-4 text-[0.78rem] rounded-md cursor-pointer ' + (isActive ? 'bg-[#EBF5FF] text-[#2563EB] font-medium' : 'text-neutral-600 hover:bg-neutral-50')}
+          className={'flex items-center gap-1.5 py-1.5 px-2 ml-4 text-[0.78rem] rounded-md cursor-pointer ' + (isActive ? 'bg-[#EBF5FF] text-[#2563EB] font-medium' : (canAccess ? 'text-neutral-600 hover:bg-neutral-50' : 'text-neutral-400'))}
         >
           {hasKids ? (isOpen ? <ChevronDown size={10} strokeWidth={2.5} className="shrink-0" /> : <ChevronRight size={10} strokeWidth={2.5} className="shrink-0" />) : <span className="w-[10px] shrink-0" />}
           <Folder size={13} strokeWidth={1.5} className={isActive ? 'text-[#2563EB]' : 'text-[#60A5FA]'} />
           <span className="flex-1 truncate">{folder.name}</span>
+          <PermBadge perm={userPerm} />
           {(docCounts.get(folder.id) || 0) > 0 && <span className="text-[0.62rem] ml-auto text-neutral-400">{docCounts.get(folder.id)}</span>}
         </div>
       )}
@@ -110,6 +130,7 @@ export function TreeFolder({
       {isOpen && hasKids && kids.map(c => (
         <TreeFolder
           key={c.id} folder={c} depth={depth + 1} folders={folders}
+          folderPerms={folderPerms}
           expanded={expanded} activeId={activeId} docCounts={docCounts}
           onNavigate={onNavigate} onToggle={onToggle} onSetActive={onSetActive} onCtx={onCtx}
           inlineCreate={inlineCreate} inlineName={inlineName} inlineSaving={inlineSaving}
