@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.production
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+prisma/dev.db
+prisma/dev.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+
+# Uploads
+public/uploads/
+
+# Misc
+screenlog.0
+
+# macOS
+._*
+__MACOSX
+
+# User data
+用户素材/
+
+# Archives
+*.tar.gz
+tsconfig.tsbuildinfo
+CLAUDE.md
+AGENTS.md

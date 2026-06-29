@@ -1,0 +1,365 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ═══════════════════════════════════════════
+// 组织架构
+// ═══════════════════════════════════════════
+
+model Company {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  slug        String       @unique
+  description String?
+  type        String       @default("company") // "group" | "company"
+  parentId    String?                          // parent group (for company under group)
+  parent      Company?     @relation("CompanyHierarchy", fields: [parentId], references: [id])
+  children    Company[]    @relation("CompanyHierarchy")
+  departments Department[]
+  users       User[]
+  userCompanies UserCompany[]
+  folders     Folder[]
+  folderPermissions FolderPermission[]
+  documentPermissions DocumentPermission[]
+  createdAt   DateTime     @default(now())
+}
+
+model Department {
+  id          String              @id @default(cuid())
+  name        String
+  slug        String
+  description String?
+  companyId   String?
+  company     Company?            @relation(fields: [companyId], references: [id])
+  users       User[]
+  ownedDocs   Document[]          @relation("OwnerDepartment")
+  audienceDocs DocumentAudience[] @relation("AudienceDepartment")
+  faqs        Faq[]
+  folderPermissions FolderPermission[]
+  documentPermissions DocumentPermission[]
+  createdAt   DateTime            @default(now())
+
+  @@unique([companyId, slug])
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String
+  passwordHash  String
+  role          String     @default("viewer") // super_admin | company_admin | dept_admin | editor | viewer
+  companyId     String?                         // primary company (legacy, kept for backward compat)
+  company       Company?   @relation(fields: [companyId], references: [id])
+  departmentId  String?
+  department    Department? @relation(fields: [departmentId], references: [id])
+  companies     UserCompany[]                   // 🆕 multi-company membership
+  documents     Document[]
+  folderPermissions FolderPermission[]
+  documentPermissions DocumentPermission[]
+  auditLogs     AuditLog[]
+  chatLogs      ChatLog[]
+  roleAssignments SysUserRole[]               // 🆕 RBAC role assignments
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+// 🆕 Multi-company user membership
+model UserCompany {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role      String   @default("viewer") // role within this company
+
+  @@unique([userId, companyId])
+}
+
+// ═══════════════════════════════════════════
+// 文件夹体系
+// ═══════════════════════════════════════════
+
+model Folder {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String
+  description String?
+
+  // Tree
+  parentId    String?
+  parent      Folder?   @relation("FolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Folder[]  @relation("FolderTree")
+
+  // Ownership
+  companyId   String?
+  company     Company?  @relation(fields: [companyId], references: [id])
+
+  // Permission inheritance
+  inheritPermissions Boolean @default(true)
+  // true = inherit from parent. false = custom permissions only.
+
+  // Ordering
+  sortOrder   Int       @default(0)
+
+  // Contents
+  documents   Document[]
+  permissions FolderPermission[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([parentId, slug])
+}
+
+model FolderPermission {
+  id       String   @id @default(cuid())
+  folderId String
+  folder   Folder   @relation(fields: [folderId], references: [id], onDelete: Cascade)
+
+  // Grant target (at least one must be set)
+  companyId    String?
+  company      Company?    @relation(fields: [companyId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id])
+  role         String?     // "super_admin" | "dept_admin" | "staff"
+
+  // Permission level
+  permission   String   // "view" | "download" | "edit" | "delete" | "admin"
+
+  createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// 文档体系
+// ═══════════════════════════════════════════
+
+model Document {
+  id              String              @id @default(cuid())
+  title           String
+  slug            String              @default("")
+  content         String              @default("")
+  fullContent     String              @default("")
+  condensedContent String             @default("")
+  extractedJson    String             @default("")
+  displayMode     String              @default("full")
+  category        String              @default("general")
+
+  // Folder membership
+  folderId        String?
+  folder          Folder?             @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  // Department ownership (optional — folder-based permissions preferred)
+  ownerDeptId     String?
+  ownerDept       Department?         @relation("OwnerDepartment", fields: [ownerDeptId], references: [id])
+  audiences       DocumentAudience[]
+  authorId        String
+  author          User                @relation(fields: [authorId], references: [id])
+
+  // Permission override
+  overridePermissions Boolean          @default(false)
+  // true = use document-level permissions (DocumentPermission)
+  // false = inherit from folder (or use legacy ownerDept+audiences)
+
+  documentPermissions DocumentPermission[]
+
+  auditLogs       AuditLog[]
+  visibility      String              @default("department")
+  sourcePath      String              @default("")
+
+  // Document metadata
+  documentType    String              @default("general")
+  processStage    String?
+  riskLevel       String?
+  aiSummary       String?
+
+  // Graph edges
+  prerequisites   String              @default("[]")
+  relatedDocs     String              @default("[]")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model DocumentPermission {
+  id           String     @id @default(cuid())
+  documentId   String
+  document     Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  companyId    String?
+  company      Company?   @relation(fields: [companyId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  userId       String?
+  user         User?      @relation(fields: [userId], references: [id])
+  role         String?    // "super_admin" | "dept_admin" | "staff"
+
+  permission   String     // "view" | "download" | "edit" | "delete" | "admin"
+
+  createdAt    DateTime   @default(now())
+}
+
+model DocumentAudience {
+  id            String     @id @default(cuid())
+  documentId    String
+  document      Document   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  departmentId  String
+  department    Department @relation("AudienceDepartment", fields: [departmentId], references: [id])
+
+  @@unique([documentId, departmentId])
+}
+
+// ═══════════════════════════════════════════
+// 其他
+// ═══════════════════════════════════════════
+
+model Bookmark {
+  id         String   @id @default(cuid())
+  userId     String
+  documentId String
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, documentId])
+}
+
+model LearningPath {
+  id        String         @id @default(cuid())
+  title     String
+  deptId    String?
+  docIds    String         @default("[]")
+  createdAt DateTime       @default(now())
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  documentId  String?
+  document    Document? @relation(fields: [documentId], references: [id])
+  action      String   // view | login | download
+  createdAt   DateTime @default(now())
+}
+
+model Faq {
+  id           String     @id @default(cuid())
+  question     String
+  answer       String
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+  category     String     @default("general")
+  order        Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model DocumentHistory {
+  id          String   @id @default(cuid())
+  documentId  String                           // Document.id (manual FK)
+  content     String                           // Markdown snapshot at save time
+  editorId    String                           // User.id (manual FK)
+  editorName  String                           // Redundant for display convenience
+  remark      String?                          // Optional edit note
+  createdAt   DateTime @default(now())
+}
+
+model ChatLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  question  String
+  answer    String
+  sources   String   @default("[]")
+  createdAt DateTime @default(now())
+}
+
+// ═══════════════════════════════════════════
+// 系统级 RBAC 权限
+// ═══════════════════════════════════════════
+
+model RolePermission {
+  id          String   @id @default(cuid())
+  role        String   @unique // "super_admin" | "dept_admin" | "editor" | "viewer"
+  permissions String   @default("[]")  // JSON string[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UserPermission {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  permissions String   @default("[]")  // JSON string[] — extra or override permissions
+  dataScope   String   @default("{}")  // JSON { companies: string[], departments: string[] }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// 系统菜单权限（RBAC 新体系）
+// ═══════════════════════════════════════════
+
+model SysMenu {
+  id          String    @id @default(cuid())
+  parentId    String?                       // 0 = root
+  name        String                        // 菜单名称
+  type        Int       @default(2)         // 1=目录 2=菜单 3=按钮
+  path        String?                       // 路由路径
+  component   String?                       // 组件路径
+  icon        String?                       // 图标名
+  sort        Int       @default(0)
+  permission  String?                       // 权限标识 (如 "system:user:list")
+  status      Int       @default(1)         // 0=禁用 1=启用
+  children    SysMenu[]  @relation("SysMenuTree")
+  parent      SysMenu?   @relation("SysMenuTree", fields: [parentId], references: [id])
+  roles       SysRoleMenu[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model SysRole {
+  id              String        @id @default(cuid())
+  name            String        @unique
+  code            String        @unique
+  description     String?
+  dataScope       Int           @default(2) // 1=全部 2=本级及下级 3=仅本级 4=仅本人 5=自定义
+  customDeptIds   String        @default("[]") // JSON array when dataScope=5
+  status          Int           @default(1)     // 0=禁用 1=启用
+  menus           SysRoleMenu[]
+  users           SysUserRole[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+model SysRoleMenu {
+  id        String  @id @default(cuid())
+  roleId    String
+  role      SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menuId    String
+  menu      SysMenu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  @@unique([roleId, menuId])
+}
+
+model SysUserRole {
+  id      String  @id @default(cuid())
+  userId  String
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId  String
+  role    SysRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  @@unique([userId, roleId])
+}
+
+model SysDept {
+  id          String    @id @default(cuid())
+  parentId    String?                       // 0 = root
+  name        String
+  sort        Int       @default(0)
+  children    SysDept[] @relation("SysDeptTree")
+  parent      SysDept?  @relation("SysDeptTree", fields: [parentId], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}

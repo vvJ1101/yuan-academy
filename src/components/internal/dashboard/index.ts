@@ -1,0 +1,16 @@
+export { DashboardHeader } from './dashboard-header'
+export { SearchBar } from './search-bar'
+export { QuickActions } from './quick-actions'
+export { CategoryChips } from './category-chips'
+export { TaskCenter } from './task-center'
+export { ForYouFeed } from './for-you-feed'
+export { StatsFooter } from './stats-footer'
+export { AIDrawer } from './ai-drawer'
+
+// Legacy — kept for backward compatibility in other pages
+export { StatsCards } from './stats-cards'
+export { QuickAccess } from './quick-access'
+export { ActivityFeed } from './activity-feed'
+export { CategoryFilter } from './category-filter'
+export { CategoryCards } from './category-cards'
+export { SmartRecommend } from './smart-recommend'
