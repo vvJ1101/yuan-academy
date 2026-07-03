@@ -1,0 +1,118 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+# 并发控制：同一分支的新推送会取消正在运行的旧部署
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env.local
+        run: |
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" > .env.local
+          echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env.local
+          echo "NODE_ENV=production" >> .env.local
+
+      - name: Build
+        run: npm run build
+
+      - name: Package build
+        run: |
+          mkdir -p deploy-pkg
+          # Copy public static files to .next for nginx alias
+          cp public/favicon.png .next/favicon.png 2>/dev/null || true
+          cp public/apple-icon.png .next/apple-icon.png 2>/dev/null || true
+          cp public/og-image.png .next/og-image.png 2>/dev/null || true
+          # Tar + gzip
+          BUILD_ID=$(cat .next/BUILD_ID)
+          tar czf deploy-pkg/next-build.tar.gz -C .next .
+          cp ecosystem.config.js deploy-pkg/
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_ENV
+          echo "Package: $(du -h deploy-pkg/next-build.tar.gz | cut -f1)"
+
+      - name: Transfer to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "deploy-pkg/*"
+          target: "/tmp/yuandeploy/"
+          strip_components: 1
+
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          envs: BUILD_ID
+          script: |
+            set -e
+            echo "Deploying build: $BUILD_ID"
+            cd /var/www/yuan-academy
+
+            # Backup current .next
+            rm -rf .next.backup
+            [ -d .next ] && mv .next .next.backup
+
+            # Extract new build
+            mkdir .next
+            tar xzf /tmp/yuandeploy/next-build.tar.gz -C .next
+            rm /tmp/yuandeploy/next-build.tar.gz
+
+            # Verify BUILD_ID
+            REMOTE_ID=$(cat .next/BUILD_ID)
+            if [ "$REMOTE_ID" != "$BUILD_ID" ]; then
+              echo "❌ BUILD_ID mismatch ($REMOTE_ID vs $BUILD_ID), rolling back"
+              rm -rf .next
+              mv .next.backup .next
+              exit 1
+            fi
+            echo "✅ BUILD_ID verified ($REMOTE_ID)"
+
+            # Copy ecosystem config
+            if [ -f /tmp/yuandeploy/ecosystem.config.js ]; then
+              cp /tmp/yuandeploy/ecosystem.config.js ./
+            fi
+            rm -rf /tmp/yuandeploy
+
+            # Restart app
+            pm2 start ecosystem.config.js --update-env 2>/dev/null || pm2 restart yuan-academy
+            pm2 save
+
+            # Health check
+            sleep 5
+            HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/login)
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Deploy successful (HTTP $HTTP_CODE)"
+              rm -rf .next.backup
+            else
+              echo "❌ Health check failed (HTTP $HTTP_CODE), rolling back"
+              rm -rf .next
+              mv .next.backup .next
+              pm2 restart yuan-academy
+              exit 1
+            fi

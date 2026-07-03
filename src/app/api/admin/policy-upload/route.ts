@@ -21,12 +21,12 @@ export async function POST(req: NextRequest) {
   if (rows.length < 2) return NextResponse.json({ error: 'No data' }, { status: 400 })
 
   const policies: Record<string, string>[] = []
-  for (let i = 2; i < rows.length; i++) {
+  for (let i = 1; i < rows.length; i++) {
     const r = rows[i]
     const brand = String(r[2] || '').trim()
     if (!brand) continue
     if (brand.startsWith('←') || brand.startsWith('[例]')) continue
-    policies.push({ category: String(r[0]||'').trim(), country: String(r[1]||'').trim(), brand, style: String(r[3]||'').trim(), priceRange: String(r[4]||'').trim(), series: String(r[5]||'').trim(), ss26: String(r[6]||'').trim(), aw26: String(r[7]||'').trim(), delivery: String(r[8]||'').trim(), nonCutoff: String(r[9]||'').trim(), pr: String(r[10]||'').trim() })
+    policies.push({ category: String(r[0]||'').trim(), country: String(r[1]||'').trim(), brand, style: String(r[3]||'').trim(), priceRange: String(r[4]||'').trim(), series: String(r[5]||'').trim(), policy: String(r[6]||'').trim(), delivery: String(r[7]||'').trim() })
   }
 
   // Merge with existing
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     const p = join(d, 'policies.json')
     if (existsSync(p)) copyFileSync(p, join(d, 'policies.backup.json'))
     writeFileSync(p, JSON.stringify(merged, null, 2), 'utf-8')
-    writeFileSync(join(d, 'policies.updated.json'), JSON.stringify({ updatedAt: new Date().toISOString() }), 'utf-8')
+    writeFileSync(join(d, 'policies.updated.json'), JSON.stringify({ updatedAt: new Date().toISOString(), updatedBy: session?.name || '未知用户' }), 'utf-8')
   }
 
   return NextResponse.json({ ok: true, count: merged.length, updated, added, brands: merged.map((p: any) => p.brand) })

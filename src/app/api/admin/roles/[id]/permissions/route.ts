@@ -19,7 +19,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const body = await req.json()
   const menuIds: string[] = body.permissionIds || body.menuIds || []
   // 记录审计日志（必须在 return 之前）
-  prisma.auditLog.create({ data: { userId: session!.id, action: "role:permissions" } }).catch(() => {})
+  prisma.auditLog.create({ data: { userId: session!.id, action: "role:permissions" } }).catch((err: any) => console.error("[AuditLogError]", err))
   await prisma.$transaction([
     prisma.sysRoleMenu.deleteMany({ where: { roleId: params.id } }),
     ...menuIds.map(menuId => prisma.sysRoleMenu.create({ data: { roleId: params.id, menuId } })),

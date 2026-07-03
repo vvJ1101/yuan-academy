@@ -17,7 +17,7 @@ export default function RecentPage() {
   useEffect(() => {
     fetch('/api/workspace/activity').then(r=>r.json()).then(d=>{
       setViews(d?.recentViews||[]); setUpdates(d?.recentUpdates||[])
-    }).catch(()=>{}).finally(()=>setLoading(false))
+    }).catch((err: any) => console.warn("[SilentError]", err)).finally(()=>setLoading(false))
   }, [])
 
   if (loading) return <div className="flex justify-center py-20"><div className="w-6 h-6 border-2 border-neutral-200 border-t-blue-600 rounded-full animate-spin mx-auto" /></div>

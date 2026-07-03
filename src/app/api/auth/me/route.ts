@@ -28,7 +28,14 @@ export async function GET(req: NextRequest) {
 
   // Compute RBAC permissions
   const { getUserPermissions } = await import('@/lib/permissions/rbac')
-  const rbac = await getUserPermissions(session)
+ const rbac = await getUserPermissions(session)
+
+  // 🆕 Last password change time from audit log
+  const lastPwdLog = await prisma.auditLog.findFirst({
+    where: { userId: session.id, action: 'change_password' },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true },
+  })
 
   return NextResponse.json({
     id: session.id,
@@ -42,5 +49,6 @@ export async function GET(req: NextRequest) {
     permissions: rbac.permissions,
     dataScope: rbac.dataScope,
     companies: userCompanies.map((uc: { company: { id: string; name: string; slug: string }; role: string }) => ({ id: uc.company.id, name: uc.company.name, slug: uc.company.slug, role: uc.role })),
+    passwordChangedAt: lastPwdLog?.createdAt?.toISOString() || null,
   })
 }

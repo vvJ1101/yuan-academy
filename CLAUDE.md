@@ -78,8 +78,9 @@
 
 ### 2. 遵循现有架构
 - 新组件放 `components/internal/`，工具函数放 `lib/`。
-- 优先复用 `cn()`、`getSession()`、`audit.ts` 等现有工具，不造重复轮子。
+- 优先复用 `cn()`、`getSession()`、`audit.ts`、`parsePolicyText()` 等现有工具，不造重复轮子。
 - 若现有函数不满足需求，先提出"扩展还是新建"，征求同意再动手。
+- **订货政策页面**已升级为三层结构（列表 → 详情 → 模块），组件在 `components/internal/policy/`。
 
 ### 3. 写操作必须记录
 - `POST`/`PUT`/`DELETE` 必须调用 `audit.ts`。
@@ -104,8 +105,30 @@
 - 图片表格加 `max-w-full overflow-x-auto`。
 - 按钮触控区域 ≥ 44px。
 
-### 8. 新依赖必须说明
-- 如果要 `npm install`，必须说明：库的作用、替代方案、构建体积增量。
+### 9. 功能测试与交互验证（强制执行）
+
+> **编译通过 ≠ 功能正常。** 每次新增或修改功能后，必须在本地 `npm run dev` 启动后实际交互测试。
+
+**测试规则**：
+- 每个新增 API 必须用 `curl` 完整跑通：正常入参 → 预期成功，异常入参 → 预期报错
+- 每个新增前端功能必须点开页面实际操作：填表、提交、查看结果
+- 覆盖各角色权限（super_admin / dept_admin / staff）分别验证
+- 测试成功/失败/边界三种情况：
+  - **正确路径** — 正常输入，功能生效
+  - **错误路径** — 错误输入，给出合理中文提示
+  - **边界情况** — 空值、超长文本、特殊字符
+
+**部署前检查清单**：
+1. `npm run dev` → 本地页面正常打开
+2. 核心功能手动操作一遍（登录、提交、查看结果）
+3. API 返回值在命令行验证（curl 测试成功/失败两种入参）
+4. 控制台无报错
+5. 确认后才执行 `scripts/deploy-local.sh`
+
+**禁止的行为**：
+- ❌ 只跑 `npm run build` 通过就认为功能正确
+- ❌ 写完代码直接部署不测试
+- ❌ 只测成功路径不测错误路径
 
 ---
 
@@ -142,7 +165,7 @@
 
 1. **修改文件清单** — 绝对路径 + 简要改动说明
 2. **核心改动代码片段** — 标注关键变更
-3. **测试验证步骤** — 操作路径 + 预期结果
+3. **测试验证步骤** — 操作路径 + 预期结果（必须含实际 curl 或交互测试结果）
 4. **回滚方案** — 如果改坏了如何恢复
 
 ---
@@ -179,17 +202,54 @@
 |------|------|
 | `src/app/api/` | 后端 API 路由 |
 | `src/app/internal/` | 内部页面（需登录） |
+| `src/app/internal/policy/` | 订货政策（品牌卡片列表） |
 | `src/components/internal/` | 业务组件 |
+| `src/components/internal/policy/` | 订货政策组件（Tabs, TierTable, FilterBar, BrandCard, CollapseSection 等） |
+| `src/components/ui/skeleton.tsx` | 骨架屏组件：`Skeleton`, `CardSkeleton`, `DocListSkeleton`, `BrandCardSkeleton`, `DashboardSkeleton`
 | `src/components/ui/` | 基础 UI 组件 |
-| `src/lib/` | 工具函数（auth, permissions, parser, prompts...） |
-| `src/types/` | 共享类型定义（dashboard 等） |
+| `src/lib/helpers.ts` | 共享工具函数：`guessType`, `fileTypeLabel`, `fmtDate`, `fmtTime`, `fmtSize`, `permOk`, `CAT_LABELS`（详情见文件注释）
+| `src/lib/` | 工具函数（auth, permissions, parser, prompts, policy-parser...） |
+| `src/types/` | 共享类型定义（dashboard, policy-layout 等） |
 | `prisma/` | 数据模型 + 种子脚本 |
 | `src/api/` | 前端 API 客户端（axios + 请求拦截器） |
 | `src/components/internal/permissions-management/` | 角色权限管理页面 |
 | `src/components/internal/Perm.tsx` | 按钮级权限组件 `<Perm code="xxx">` |
-| `public/data/` | 静态数据文件（政策 JSON 等） |
+| `public/data/` | 静态数据文件（policies.json, policy-layouts.json 等） |
+| `public/showroom/data/` | 订货政策核心数据（**policies.json** = 品牌列表 + 阶梯规则，**policies.updated.json** = 更新时间戳） |
+| `public/showroom/data/` | 政策 JSON 数据（policies.json, policies.updated.json） |
 | `public/uploads/documents/` | 上传的文档文件 |
 | `scripts/` | 工具脚本（FTS 迁移、文档导入等） |
+
+### 订货政策系统架构
+
+**品牌卡片列表** `/internal/policy`，数据源 `public/showroom/data/policies.json`（14 品牌，11 字段）。
+
+页面功能：
+- 搜索/类目筛选/国家筛选，排序切换
+- 点击品牌卡片展开，查看阶梯表格 + 补充说明
+- 管理员可编辑/添加/删除/导出 Excel
+
+> ⚠️ **数据文件警告**：以下文件是订货政策的业务数据源，**禁止删除**：
+> - `public/showroom/data/policies.json` — 品牌列表 + 阶梯规则（API 写入，页面读取）
+> - `public/showroom/data/policies.updated.json` — 更新时间戳（含 updatedAt / updatedBy）
+> - `public/data/policies.json` — 同上，双目录同步
+> - `public/data/policies.updated.json` — 同上，双目录同步
+> 
+> 如需恢复：`git checkout HEAD -- public/showroom/data/policies.json public/data/policies.json`
+> 如果政策列表页为空，优先检查这些文件是否存在。
+
+**关键 API**：
+| 端点 | 方法 | 用途 |
+|------|------|------|
+| `/api/admin/policy` | PUT | 保存政策数据（super_admin） |
+| `/api/admin/policy/parse` | POST | 规则解析政策文本（公开） |
+| `/api/admin/policy-upload` | POST | Excel 上传更新政策数据 |
+
+**关键文件**：
+- `src/app/internal/policy/page.tsx` — 品牌卡片列表页，含 `PolicyDetailTable` 组件（阶梯表格 + 补充说明 + 复制按钮）
+- `src/lib/policy-parser.ts` — 规则驱动文本解析器，`parsePolicyText()` 返回 `{ orderRule, tiers[], supplementaryNotes[] }`
+- `public/showroom/data/policies.json` — 数据源
+- `public/showroom/data/policies.updated.json` — 更新时间戳（`{ updatedAt }`）
 
 ### 运维文档
 
@@ -199,6 +259,7 @@
 
 如果其他 Codex 会话需要处理本项目，请让它们阅读本文件的全部内容后开始工作。  
 部署相关的命令链、服务器信息、回滚流程在 `DEPLOY.md` 中，务必一并引用。
+注意：`ecosystem.config.js`（PM2 配置）和 `public/` 下的静态文件不会随 `.next/` 自动部署，有改动时需手动 scp 或并入部署脚本。
 
 ```bash
 # 其他 Codex 会话启动时应读取的文件清单

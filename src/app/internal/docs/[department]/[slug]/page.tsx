@@ -40,11 +40,11 @@ export default function DocPage() {
     fetch('/api/bookmarks')
       .then(r => r.json())
       .then(d => { if (d?.ids?.includes(doc.id)) setBookmarked(true) })
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
     fetch(`/api/documents/${doc.id}/graph`)
       .then(r => r.json())
       .then(d => { if (d?.edges) setGraph(d) })
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
   }, [doc?.id])
 
   const toggleBookmark = async () => {
@@ -255,7 +255,7 @@ export default function DocPage() {
   )
 }
 
-function GraphBlock({ title, docs }: { title: ReactNode; docs: any[] }) {
+function GraphBlock({ title, docs }: { title: ReactNode; docs: {id:string;title:string;slug:string;category:string;ownerDept?:{name:string;slug:string}|null}[] }) {
   return (
     <div className="bg-white border border-neutral-200 rounded-xl p-4">
       <p className="text-[0.72rem] font-medium text-neutral-500 mb-2">{title}</p>

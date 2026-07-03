@@ -11,11 +11,12 @@ interface FolderItem { id: string; name: string; slug: string; parentId: string 
 interface Company { id: string; name: string; slug: string }
 
 const QUICK_LINKS = [
-  { href: '/internal/dashboard', label: '首页', Icon: Home, perm: 'menu.dashboard', permKey: 'dashboard:view' },
-  { href: '/internal/recent', label: '最近访问', Icon: Clock, perm: 'menu.recent', permKey: 'personal:recent' },
-  { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'personal:favorites' },
-  { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'knowledge:list' },
-  { href: '/internal/policy', label: '订货政策', Icon: ScrollText, permKey: 'policy:view' },
+  { href: '/internal/dashboard', label: '首页', Icon: Home, perm: 'menu.dashboard', permKey: 'menu.dashboard' },
+  { href: '/internal/recent', label: '最近访问', Icon: Clock, perm: 'menu.recent', permKey: 'menu.recent' },
+  { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'menu.favorites' },
+  { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'menu.documents' },
+  { href: '/internal/policy', label: '订货政策', Icon: ScrollText, permKey: 'menu.policy' },
+  { href: '/internal/policy-upload', label: '政策上传', Icon: Upload, permKey: 'menu.policyUpload' },
   { href: '/internal/admin', label: '管理中心', Icon: Wrench, perm: 'menu.admin', permKey: 'admin' },
 ]
 
@@ -28,8 +29,8 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [activeId, setActiveId] = useState('')
   const [ctxMenu, setCtxMenu] = useState<any>(null)
   const [permTarget, setPermTarget] = useState<any>(null)
-  const [depts, setDepts] = useState<any[]>([])
-  const [allUsers, setAllUsers] = useState<any[]>([])
+  const [depts, setDepts] = useState<{id:string;name:string;slug:string;companyId:string}[]>([])
+  const [allUsers, setAllUsers] = useState<{id:string;name:string;email:string;role:string;departmentId:string}[]>([])
   const [storage, setStorage] = useState<{ usedGB: number; totalGB: number; percent: number }>({ usedGB: 0, totalGB: 100, percent: 0 })
 
   // ── Inline create state ──
@@ -46,8 +47,8 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [folderPerms, setFolderPerms] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.permissions) setUserPerms(u.permissions) }).catch(()=>{})
-    fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch(()=>{})
+    fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.permissions) setUserPerms(u.permissions) }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch((err: any) => console.warn("[SilentError]", err))
 
     fetch('/api/folders').then(r => r.json()).then(d => {
       if (d?.folders) {
@@ -60,10 +61,10 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
         setFolderPerms(perms)
       }
       if (d?.storage) setStorage(d.storage)
-    }).catch(() => {})
-    fetch('/api/companies').then(r => r.json()).then(d => { if (Array.isArray(d)) setCompanies(d) }).catch(() => {})
-    fetch('/api/departments').then(r => r.json()).then(d => { if (Array.isArray(d)) setDepts(d) }).catch(() => {})
-    fetch('/api/users').then(r => r.json()).then(d => { if (Array.isArray(d)) setAllUsers(d) }).catch(() => {})
+    }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/companies').then(r => r.json()).then(d => { if (Array.isArray(d)) setCompanies(d) }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/departments').then(r => r.json()).then(d => { if (Array.isArray(d)) setDepts(d) }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/users').then(r => r.json()).then(d => { if (Array.isArray(d)) setAllUsers(d) }).catch((err: any) => console.warn("[SilentError]", err))
   }, [])
 
   async function refreshFolders() {

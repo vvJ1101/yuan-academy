@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Table, Button, Input, Space, Modal, Form, Tree, Radio, Tag, message,
   Popconfirm, Card, Breadcrumb, Select, Checkbox
@@ -88,6 +88,28 @@ function getAllKeys(nodes: DataNode[]): string[] {
   const [addUserOpen, setAddUserOpen] = useState(false)
   const [allUsers, setAllUsers] = useState<UserVO[]>([])
   const [selectedNewUsers, setSelectedNewUsers] = useState<string[]>([])
+
+  // ── Group allUsers by department ──
+  const groupedUsers = useMemo(() => {
+    const groups = new Map<string, { id: string; name: string; email: string; department: string }[]>()
+    for (const u of allUsers) {
+      const raw = u as any
+      const deptName = raw.department?.name || '未分配'
+      if (!groups.has(deptName)) groups.set(deptName, [])
+      groups.get(deptName)!.push({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        department: deptName,
+      })
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => {
+        if (a === '未分配') return 1
+        if (b === '未分配') return -1
+        return a.localeCompare(b, 'zh-CN')
+      })
+  }, [allUsers])
 
   // ── Load roles ──
   const loadRoles = useCallback(async (page = 1, name?: string) => {
@@ -373,13 +395,71 @@ function getAllKeys(nodes: DataNode[]): string[] {
       {/* ── Add User Sub-modal ── */}
       <Modal title="选择用户" open={addUserOpen} onCancel={() => { setAddUserOpen(false); setSelectedNewUsers([]) }}
         onOk={handleAddUsers} okText="添加" destroyOnClose>
-        <Checkbox.Group value={selectedNewUsers} onChange={setSelectedNewUsers}
-          style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflow: 'auto' }}>
-          {allUsers.map(u => (
-            <Checkbox key={u.id} value={u.id}>{u.name} ({u.email}) - {u.department}</Checkbox>
-          ))}
-        </Checkbox.Group>
-        {allUsers.length === 0 && <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>所有用户已添加</div>}
+        {allUsers.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: 20, color: '#999' }}>所有用户已添加</div>
+        ) : (
+          <div style={{ maxHeight: 420, overflow: 'auto' }}>
+            {groupedUsers.map(([deptName, users]) => {
+              const allSelected = users.every(u => selectedNewUsers.includes(u.id))
+              const partSelected = users.some(u => selectedNewUsers.includes(u.id))
+              return (
+                <div key={deptName} style={{ marginBottom: 12 }}>
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '6px 10px', backgroundColor: '#f9f9f9',
+                      borderRadius: 6, marginBottom: 4, border: '1px solid #f0f0f0',
+                    }}
+                  >
+                    <span
+                      onClick={e => { e.stopPropagation(); if (allSelected) {
+                        setSelectedNewUsers(prev => prev.filter(id => !users.some(u => u.id === id)))
+                      } else {
+                        setSelectedNewUsers(prev => [...prev, ...users.map(u => u.id).filter(id => !prev.includes(id))])
+                      }}}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 16, height: 16, borderRadius: 3, cursor: 'pointer', flexShrink: 0,
+                        backgroundColor: allSelected ? '#1677ff' : 'transparent',
+                        border: allSelected ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                        color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: '16px', userSelect: 'none',
+                      }}
+                    >{allSelected ? '✓' : partSelected ? '—' : ''}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>{deptName}</span>
+                    <span style={{ fontSize: 11, color: '#999', backgroundColor: '#eee', padding: '0 8px', borderRadius: 10, lineHeight: '20px' }}>{users.length}人</span>
+                  </div>
+                  <div style={{ paddingLeft: 28, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    {users.map(u => (
+                      <span
+                        onClick={() => {
+                          if (selectedNewUsers.includes(u.id)) {
+                            setSelectedNewUsers(prev => prev.filter(id => id !== u.id))
+                          } else {
+                            setSelectedNewUsers(prev => [...prev, u.id])
+                          }
+                        }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                          fontSize: 13, padding: '2px 0', cursor: 'pointer', userSelect: 'none',
+                        }}
+                      >
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 16, height: 16, borderRadius: 3, flexShrink: 0,
+                          backgroundColor: selectedNewUsers.includes(u.id) ? '#1677ff' : 'transparent',
+                          border: selectedNewUsers.includes(u.id) ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                          color: '#fff', fontSize: 11, fontWeight: 700, lineHeight: '16px',
+                        }}>{selectedNewUsers.includes(u.id) ? '✓' : ''}</span>
+                        <span>{u.name}</span>
+                        <span style={{ color: '#999', fontSize: 12 }}>({u.email})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </Modal>
 
       <style>{`

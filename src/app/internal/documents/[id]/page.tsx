@@ -32,7 +32,7 @@ export default function DocumentDetailPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [bookmarked, setBookmarked] = useState(false)
-  const [history, setHistory] = useState<any[]>([])
+  const [history, setHistory] = useState<{id:string;userId:string;action:string;createdAt:string;user?:{name:string}}[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
 
@@ -62,7 +62,7 @@ export default function DocumentDetailPage() {
     fetch('/api/bookmarks')
       .then(r => r.json())
       .then(d => { if (d?.ids?.includes(id)) setBookmarked(true) })
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
   }, [id])
 
   const canEdit = doc?.userPermission === 'admin' || doc?.userPermission === 'edit' || doc?.userPermission === 'delete'

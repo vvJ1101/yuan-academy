@@ -7,7 +7,10 @@ import { Loader2, FileText, Book, Folder, Lock, User, Key, Users, Building2 } fr
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AiAnalyzer } from '@/components/internal/ai-analyzer'
 import { ContextMenu } from '@/components/internal/context-menu'
-import { DetailPanel } from '@/components/internal/detail-panel'
+import { guessType, fileTypeLabel, fmtDate, CAT_LABELS } from '@/lib/helpers'
+import dynamic from 'next/dynamic'
+import { DocListSkeleton } from '@/components/ui/skeleton'
+const DetailPanel = dynamic(() => import('@/components/internal/detail-panel').then(m => m.DetailPanel), { ssr: false, loading: () => <div className="w-[300px] shrink-0 bg-white border-l border-neutral-200" /> })
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
 
 // ── Types ──
@@ -15,7 +18,7 @@ interface Doc {
   id: string; title: string; category: string; slug: string
   fullContent: string; condensedContent: string; content?: string
   ownerDeptId?: string | null; ownerDept?: { name: string; slug: string } | null
-  audiences?: any[]; folderId: string | null; folder?: { id: string; name: string } | null
+  audiences?: {department?:{name:string;slug:string}}[]; folderId: string | null; folder?: { id: string; name: string } | null
   updatedAt: string; author: { name: string }; userPermission?: string | null
   fileSize?: number | null; summary?: string
 }
@@ -26,17 +29,14 @@ interface Dept { id: string; name: string; slug: string; companyId: string }
 interface User { id: string; name: string; email: string; role: string; departmentId: string }
 interface PermEntry { id: string; companyId: string | null; company?: { id: string; name: string } | null; departmentId: string | null; department?: { id: string; name: string } | null; userId: string | null; user?: { id: string; name: string; email: string } | null; role: string | null; permission: string }
 
-const CAT_LABELS: Record<string, string> = { training: '培训', sop: 'SOP', policy: '政策', reference: '制度', brand: '品牌' }
+
 const CAT_STYLE: Record<string, string> = { sop: 'bg-blue-50 text-blue-700', training: 'bg-emerald-50 text-emerald-700', policy: 'bg-amber-50 text-amber-700', reference: 'bg-slate-100 text-slate-600', brand: 'bg-purple-50 text-purple-700' }
 const PERM_LABELS: Record<string, string> = { view: '查看', edit: '编辑', delete: '删除', admin: '管理' }
 const PERM_LEVEL: Record<string, number> = { view: 1, edit: 2, delete: 3, admin: 4 }
 
-function fmtDate(iso?: string) { if(!iso) return ''; const n=new Date(); const d=new Date(iso); const diff=n.getTime()-d.getTime(); const days=Math.floor(diff/864e5); if(days===0)return'今天';if(days===1)return'昨天';if(days<7)return`${days}天前`;return d.toLocaleDateString('zh-CN',{month:'short',day:'numeric'}) }
 function fmtSize(d: Doc): string { if (d.fileSize) { const b = d.fileSize; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` } const c = d.fullContent || d.condensedContent || ''; const b = new Blob([c]).size; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` }
 function permOk(p: string|null, r: string): boolean { if(!p) return false; return (PERM_LEVEL[p]||0) >= (PERM_LEVEL[r]||0) }
-function guessType(d: Doc): string { const t = d.title.toLowerCase(); if (t.endsWith('.xlsx') || t.endsWith('.xls')) return 'excel'; if (t.endsWith('.docx') || t.endsWith('.doc')) return 'word'; if (t.endsWith('.pdf')) return 'pdf'; const cat = d.category; if (cat === 'sop') return 'word'; if (cat === 'policy') return 'excel'; if (cat === 'training') return 'word'; if (cat === 'reference') return 'pdf'; if (cat === 'brand') return 'pdf'; return 'other' }
-function fileIcon(d: Doc) { const t = guessType(d); if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />; return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> }
-function fileType(d: Doc): string { const t = guessType(d); if (t === 'excel') return 'Excel'; if (t === 'word') return 'Word'; if (t === 'pdf') return 'PDF'; return CAT_LABELS[d.category] || '文档' }
+function fileIcon(d: Doc) { const t = guessType(d.title, d.category); if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />; return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> }
 
 // ═══════════════════════════════════════════
 function DocumentsContent() {
@@ -45,7 +45,7 @@ function DocumentsContent() {
   const [me, setMe] = useState<Me | null>(null); const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState(sp.get('search')||'')
   const [sortBy, setSortBy] = useState<'newest'|'oldest'|'name'|'category'>('newest')
-  const [spaceFilter, setSpaceFilter] = useState(sp.get('space')||''); const [folderFilter, setFolderFilter] = useState('')
+  const [spaceFilter, setSpaceFilter] = useState(sp.get('space')||''); const [folderFilter, setFolderFilter] = useState(''); const [companyFilter, setCompanyFilter] = useState(sp.get("company")||"")
   const [showUpload, setShowUpload] = useState(false); const [upTitle, setUpTitle] = useState('')
   const [upFile, setUpFile] = useState<File | null>(null); const [upFolderId, setUpFolderId] = useState('')
   const [upCat, setUpCat] = useState('sop'); const [upAiParse, setUpAiParse] = useState(true)
@@ -63,8 +63,8 @@ function DocumentsContent() {
   const [newSpaceOpen, setNewSpaceOpen] = useState(false); const [nsName, setNsName] = useState(''); const [nsCompanyId, setNsCompanyId] = useState('')
   const [permTarget, setPermTarget] = useState<Folder | null>(null)
   const [docPermTarget, setDocPermTarget] = useState<Doc | null>(null)
-  const [recDocs, setRecDocs] = useState<any[]>([])
-  const [hotDocs, setHotDocs] = useState<any[]>([])
+  const [recDocs, setRecDocs] = useState<{id:string;title:string;slug:string;category:string;reason?:string;department?:string;ownerDept?:{name:string;slug:string}|null;audiences?:{department:{slug:string}}[];audienceSlug?:string}[]>([])
+  const [hotDocs, setHotDocs] = useState<{id:string;title:string;slug:string;category:string;department?:string;audienceSlug?:string;viewCount?:number;updatedAt?:string;ownerDept?:{name:string;slug:string};audiences?:{department:{slug:string}}[]}[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const isSuper = me?.role === 'super_admin'
   const canUpload = isSuper || me?.role === 'dept_admin'
@@ -116,22 +116,26 @@ function DocumentsContent() {
   // Fetch recommendations + hot docs for bottom modules
   useEffect(()=>{
     fetch('/api/recommendations/home').then(r=>r.json()).then(d=>{
-      if(d?.popular) setRecDocs(d.popular)
-    }).catch(()=>{})
+      if(d?.forYou) setRecDocs(d.forYou)
+    }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/dashboard').then(r=>r.json()).then(d=>{
       if(d?.popularDocs) setHotDocs(d.popularDocs)
-    }).catch(()=>{})
+    }).catch((err: any) => console.warn("[SilentError]", err))
   },[])
   const refresh = ()=>fetch('/api/documents').then(r=>r.json()).then(d=>{if(Array.isArray(d))setDocs(d)})
 
   const spaces = folders.filter(f=>!f.parentId)
-  useEffect(()=>{if(!loading&&spaces.length>0){if(!spaceFilter){const best=spaces.find(s=>s._count?.documents>0||s._count?.children>0)||spaces[0];setSpaceFilter(best.id)};setExpanded(prev=>{const n=new Set(prev);n.add(spaceFilter||spaces[0].id);return n})}},[loading,spaces.length])
+  useEffect(()=>{if(!loading&&spaces.length>0){const resolved=spaceFilter?(folders.find(f=>f.id===spaceFilter)||folders.find(f=>f.slug===spaceFilter))?.id||"":"";if(resolved&&resolved!==spaceFilter){setSpaceFilter(resolved)}else if(!spaceFilter&&!companyFilter){const best=spaces.find(s=>s._count?.documents>0||s._count?.children>0)||spaces[0];setSpaceFilter(best.id);setExpanded(prev=>{const n=new Set(prev);n.add(best.id);return n})}else if(!spaceFilter&&companyFilter){setExpanded(prev=>{const n=new Set(prev);folders.filter(f=>f.companyId===companyFilter).forEach(f=>n.add(f.id));return n})}}},[loading,spaces.length,companyFilter])
   // Sync spaceFilter from URL param when navigating from sidebar
-  useEffect(()=>{const sid=sp.get('space');const fid=sp.get('folder')||'';if(sid&&sid!==spaceFilter){setSpaceFilter(sid);setFolderFilter(fid)}else if(fid!==folderFilter){setFolderFilter(fid)}},[sp.get('space'), sp.get('folder')])
+    useEffect(()=>{const sid=sp.get('space');const fid=sp.get('folder')||'';if(sid&&sid!==spaceFilter){setSpaceFilter(sid);setFolderFilter(fid)}else if(fid!==folderFilter){setFolderFilter(fid)}},[sp.get('space'), sp.get('folder')])
+  // Resolve slug to folder ID when spaceFilter changes and folders are loaded
+  useEffect(()=>{if(!loading&&folders.length>0&&spaceFilter){const folder=folders.find(f=>f.id===spaceFilter)||folders.find(f=>f.slug===spaceFilter);if(folder&&folder.id!==spaceFilter){setSpaceFilter(folder.id)}}},[spaceFilter,loading,folders])
 
+    useEffect(()=>{if(!companyFilter||loading||companies.length===0)return;if(companyFilter==='_notfound_')return;if(companyFilter.length<20){const c=companies.find(c=>c.slug===companyFilter);if(c&&c.id!==companyFilter)setCompanyFilter(c.id);else if(!c)setCompanyFilter('_notfound_')}},[companyFilter,loading,companies])
+  useEffect(()=>{const cid=sp.get("company")||"";if(cid&&cid!==companyFilter)setCompanyFilter(cid)},[sp.get("company")])
   const spaceFolderIds = new Set<string>()
   function collectIds(pid: string) { folders.filter(f=>f.parentId===pid).forEach(f=>{spaceFolderIds.add(f.id);collectIds(f.id)}) }
-  if(spaceFilter){ spaceFolderIds.add(spaceFilter); collectIds(spaceFilter) }
+  if(companyFilter&&companyFilter!=="_notfound_"){folders.filter(f=>f.companyId===companyFilter).forEach(f=>spaceFolderIds.add(f.id))}
 
   let filtered = docs.filter(d=>{
     if(search&&!d.title.toLowerCase().includes(search.toLowerCase())) return false
@@ -150,7 +154,7 @@ function DocumentsContent() {
   })
 
   // Resolve actual space and folder chain from spaceFilter (may point to a subfolder)
-  let currentSpace = folders.find(f=>f.id===spaceFilter) || null
+  let currentSpace = folders.find(f=>f.id===spaceFilter) || folders.find(f=>f.slug===spaceFilter) || null
   const currentFolder = folders.find(f=>f.id===folderFilter) || null
   // If spaceFilter points to a subfolder (has parentId), walk up to find the actual space
   const extraChain: Folder[] = []
@@ -206,11 +210,7 @@ function DocumentsContent() {
   async function deleteDoc(doc:Doc){if(!confirm(`删除「${doc.title}」？`))return;await fetch(`/api/documents/${doc.id}`,{method:'DELETE'});refresh();setSelectedDoc(null)}
   async function moveDocument(docId:string,fid:string|null){await fetch(`/api/documents/${docId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:fid||null})});refresh();setMoveDoc(null)}
 
-  if(loading)return (
-    <div className="flex-1 flex items-center justify-center bg-[#F8F9FA]">
-      <div className="text-center"><Loader2 size={20} strokeWidth={1.5} className="animate-spin text-[#2563EB] mx-auto mb-3" /><p className="text-[0.85rem] text-neutral-400">加载中...</p></div>
-    </div>
-  )
+  if(loading)return <DocListSkeleton />
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -386,7 +386,7 @@ function DocumentsContent() {
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <span className="text-[0.72rem] text-neutral-500">{fileType(d)}</span>
+                        <span className="text-[0.72rem] text-neutral-500">{fileTypeLabel(d.title, d.category)}</span>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-[0.72rem] text-neutral-500">{d.updatedAt ? new Date(d.updatedAt).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }) : '—'}</span>
@@ -432,7 +432,7 @@ function DocumentsContent() {
         )}
 
         {/* ═══ Bottom Module 1: Related Documents (from API) ═══ */}
-        {currentSpace && filtered.length > 0 && recDocs.length > 0 && (
+        {recDocs.length > 0 && (
           <div className="shrink-0 px-6 py-2.5 bg-white border-t border-neutral-100">
             <div className="flex items-center gap-2 mb-1.5">
               <span className="text-[0.7rem] font-medium text-neutral-400 uppercase tracking-wider">相关文档推荐</span>
@@ -457,7 +457,7 @@ function DocumentsContent() {
         )}
 
         {/* ═══ Bottom Module 2: Hot Documents This Week (from API) ═══ */}
-        {currentSpace && filtered.length > 0 && hotDocs.length > 0 && (
+        {hotDocs.length > 0 && (
           <div className="shrink-0 px-6 py-2.5 bg-neutral-50 border-t border-neutral-100">
             <div className="flex items-center gap-2 mb-1.5">
               <span className="text-[0.7rem] font-medium text-neutral-400 uppercase tracking-wider">本周热门文档</span>
@@ -671,5 +671,5 @@ function PermModal({ folder, companies, depts, users, onClose, onSave }: { folde
 }
 
 export default function DocumentsPage() {
-  return <Suspense fallback={<div className="p-10 text-center text-neutral-400">加载中...</div>}><DocumentsContent /></Suspense>
+  return <Suspense fallback={<DocListSkeleton />}><DocumentsContent /></Suspense>
 }

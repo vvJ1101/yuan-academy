@@ -14,6 +14,7 @@ export interface PolicyTier {
 export interface PolicyStructure {
   orderRule: string
   tiers: PolicyTier[]
+  supplementaryNotes: string[]
 }
 
 // ── 清洗工具 ──
@@ -43,8 +44,8 @@ function removeNoise(line: string): string {
 
 // ── 匹配正则 ──
 
-/** 阈值匹配：数字+W/K/万/万元/元 */
-const THRESHOLD_RE = /\d+(?:\.\d+)?\s*(?:W|K|万|万元|元)/
+/** 阈值匹配：数字+W/w/K/万/V(常见手误)/万元/元，不区分大小写 */
+const THRESHOLD_RE = /\d+(?:\.\d+)?\s*(?:W|V|K|万|万元|元)/i
 
 /** 折扣匹配：数字+折 */
 const PRICE_RE = /\d+(?:\.\d+)?\s*折/
@@ -68,11 +69,13 @@ export function parsePolicyText(input: string): PolicyStructure {
   // 找包含起订/起订量/MOQ的行
   const ruleLines: string[] = []
   const otherLines: string[] = []
+  const orderRuleLines: string[] = []
 
   for (const line of lines) {
-    const hasRule = /起订|MOQ|起订量|最低订货|最小起订/i.test(line)
+    const hasRule = /起订|MOQ|起订量|最低订货|最小起订|单款数量|单款单色/i.test(line)
     if (hasRule) {
       ruleLines.push(line)
+      orderRuleLines.push(line)
     } else {
       otherLines.push(line)
     }
@@ -87,26 +90,33 @@ export function parsePolicyText(input: string): PolicyStructure {
     tierLines = lines.slice(1)
   }
 
-  // 3. 解析 tiers
+  // 3. 解析 tiers + 补充说明
   const tiers: PolicyTier[] = []
+  const supplementaryNotes: string[] = []
 
   for (const rawLine of tierLines) {
+    if (orderRuleLines.includes(rawLine)) continue
     const line = removeNoise(rawLine)
     if (!line) continue
 
-    const thresholdMatch = line.match(THRESHOLD_RE)
+    const thresholdMatch = line.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*[\u53cc]|\/\s*[\u4ef6]|\/\s*[\u5957])?\s*(?:W|V|K|[\u4e07][\u5143]?|[\u5143])/i)
     const priceMatch = line.match(PRICE_RE)
 
-    const threshold = thresholdMatch ? thresholdMatch[0].replace(/\s+/g, '') : ''
+    const threshold = thresholdMatch ? thresholdMatch[0].replace(/\s+/g, '').replace(/[wv]$/i, 'W') : ''
     const price = priceMatch ? priceMatch[0].replace(/\s+/g, '') : ''
+
+    if (!threshold && !price) {
+      if (/^(?:\u6761\u6b3e\s*\d|\u5907\u6ce8|\u8bf4\u660e|\u6ce8[\uff1a:]|[\u3010]|\u534f\u8bae|\u653f\u7b56|\u89c4\u5219|\u6761\u6b3e)/.test(line) || line.length < 3) continue
+      supplementaryNotes.push(line)
+      continue
+    }
 
     // 提取 note：从行中移除 threshold 和 price 后剩余内容
     let note = line
-    if (threshold) note = note.replace(thresholdMatch![0], '')
+    if (thresholdMatch) note = note.replace(thresholdMatch[0], '')
     if (price) note = note.replace(priceMatch![0], '')
-    note = cleanText(note)
+    note = note.replace(/[\uff0c,]/g, ' ').replace(/[ \t]+/g, ' ').trim()
 
-    // 如果 threshold 和 price 都为空，整行作为 note
     tiers.push({
       threshold,
       price,
@@ -114,5 +124,6 @@ export function parsePolicyText(input: string): PolicyStructure {
     })
   }
 
-  return { orderRule, tiers }
+  const uniqueNotes = [...new Set(supplementaryNotes)]
+  return { orderRule, tiers, supplementaryNotes: uniqueNotes }
 }

@@ -289,8 +289,8 @@ export function MarkdownReader({ doc, canManage: canManageProp, hideHeader }: { 
   const [edCategory, setEdCategory] = useState('')
   const [metaStatus, setMetaStatus] = useState<'idle' | 'saving' | 'done' | 'error'>('idle')
   const [metaMsg, setMetaMsg] = useState('')
-  const [deptsForMeta, setDeptsForMeta] = useState<any[]>([])
-  const [compsForMeta, setCompsForMeta] = useState<any[]>([])
+  const [deptsForMeta, setDeptsForMeta] = useState<{id:string;name:string;slug:string;companyId:string}[]>([])
+  const [compsForMeta, setCompsForMeta] = useState<{id:string;name:string;slug:string}[]>([])
   const [deleting, setDeleting] = useState(false)
 
   // Free-form editing state (not derived from regex)
@@ -320,7 +320,7 @@ export function MarkdownReader({ doc, canManage: canManageProp, hideHeader }: { 
         if (u.role === 'dept_admin' && u.departmentId && doc.ownerDeptId) {
           if (u.departmentId === doc.ownerDeptId) setCanManage(true)
         }
-      }).catch(() => {})
+      }).catch((err: any) => console.warn("[SilentError]", err))
   }, [doc.id, canManageProp])
 
   function startEditing() {
@@ -493,7 +493,7 @@ export function MarkdownReader({ doc, canManage: canManageProp, hideHeader }: { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documentId: doc.id, action: 'view' }),
-    }).catch(() => {}) // silent fail
+    }).catch((err: any) => console.warn("[SilentError]", err)) // silent fail
   }, [doc.id])
 
   const scrollTo = useCallback((id: string) => {

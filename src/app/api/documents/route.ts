@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
   if (audienceIds.length > 0) {
     await Promise.all(audienceIds.map((deptId: string) =>
       prisma.documentAudience.create({ data: { documentId: doc.id, departmentId: deptId } })
-        .catch(() => {}) // ignore duplicates
+        .catch((err: any) => console.error("[AuditLogError]", err)) // ignore duplicates
     ))
   }
 

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   // Sync multi-company memberships
   if (Array.isArray(companyIds) && companyIds.length > 0) {
     for (const cid of companyIds) {
-      await (prisma as any).userCompany.create({ data: { userId: user.id, companyId: cid } }).catch(() => {})
+      await (prisma as any).userCompany.create({ data: { userId: user.id, companyId: cid } }).catch((err: any) => console.error("[AuditLogError]", err))
     }
   }
   return NextResponse.json(user, { status: 201 })
@@ -62,11 +62,23 @@ export async function PUT(req: NextRequest) {
     where: { id }, data,
     select: { id: true, email: true, name: true, role: true, companyId: true, departmentId: true },
   })
+
+  // ── 审计日志：管理员重置密码 ──
+  if (password) {
+    try {
+      await prisma.auditLog.create({
+        data: { userId: session.id, action: `admin_reset_password:${id}` },
+      })
+    } catch {
+      console.error('[AUDIT] 管理员重置密码审计日志写入失败')
+    }
+  }
+
   // Sync multi-company memberships
   if (Array.isArray(companyIds)) {
     await (prisma as any).userCompany.deleteMany({ where: { userId: id } })
     for (const cid of companyIds) {
-      await (prisma as any).userCompany.create({ data: { userId: id, companyId: cid } }).catch(() => {})
+      await (prisma as any).userCompany.create({ data: { userId: id, companyId: cid } }).catch((err: any) => console.error("[AuditLogError]", err))
     }
   }
   return NextResponse.json(user)

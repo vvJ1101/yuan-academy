@@ -6,9 +6,10 @@ import { prisma } from '@/lib/prisma'
 
 type Intent = 'question' | 'document' | 'sop' | 'howto'
 
+const proxyUrl = process.env.DEEPSEEK_PROXY_URL
 const aiClient = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || '',
-  baseURL: 'https://api.deepseek.com/v1',
+  baseURL: proxyUrl ? proxyUrl.replace(/\/$/, '') + '/v1' : 'https://api.deepseek.com/v1',
 })
 
 const INTENT_PROMPT = `Classify the user query into exactly one intent. Reply with ONLY the word.

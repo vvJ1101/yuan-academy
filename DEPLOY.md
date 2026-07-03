@@ -9,7 +9,7 @@
 | **SSH 用户** | `root` |
 | **SSH 密码** | `Huang991208` |
 | **项目路径** | `/var/www/yuan-academy` |
-| **PM2 进程名** | `yuan-academy`（fork 单实例，256MB 上限） |
+| **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
 
 ## 环境变量（生产）
 
@@ -24,29 +24,31 @@ NODE_ENV=production
 ## 部署工作流
 
 ### 前置条件
-- 本地已安装 `rsync`（macOS 自带）
+- 本地已安装 `scp` 和 `tar`
 - SSH 免密登录已配置：`ssh root@120.79.162.27`
 - 本地 Node.js >= 18
 
 ### 一键部署脚本
 
 ```bash
-cd /Users/vv/yuan-academy
+cd /Users/vv/Documents/YUAN开发/yuan-academy
 bash scripts/deploy-local.sh
 ```
 
 脚本自动执行：
-1. 本地 `npm run build`
-2. rsync 源代码到服务器（排除 node_modules、.next、.git、数据库）
-3. rsync `.next/` 构建产物到服务器
-4. 服务器上自动 `pm2 restart` 并验证
+1. 本地 `npm run build`（保留 `.next/cache` 加速增量编译）
+2. `xattr -cr` 清除 macOS 扩展属性
+3. tar 打包构建产物（排除 `*.map` 文件）
+4. scp 传输到服务器
+5. 服务器备份旧 `.next` → 解压新版本 → 校验 BUILD_ID
+6. PM2 重启 + 健康检查（失败自动回滚）
 
 ### 手动分步部署
 
 ```bash
 # 1. 本地构建
-cd /Users/vv/yuan-academy
-rm -rf .next
+cd /Users/vv/Documents/YUAN开发/yuan-academy
+[ -d .next ] && find .next -maxdepth 1 ! -name .next ! -name cache -exec rm -rf {} +
 NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
 # 2. 同步源代码（排除大文件和敏感文件）
@@ -61,11 +63,29 @@ rsync -avz --delete \
   ./ root@120.79.162.27:/var/www/yuan-academy/
 
 # 3. 同步构建产物
-rsync -avz --delete .next/ root@120.79.162.27:/var/www/yuan-academy/.next/
+# 清除 macOS 扩展属性，然后打包传输
+xattr -cr .next 2>/dev/null || true
+tar cf /tmp/next-build.tar --exclude='*.map' -C .next .
+scp /tmp/next-build.tar root@120.79.162.27:/tmp/
 
 # 4. 服务器部署
 ssh root@120.79.162.27 "
   cd /var/www/yuan-academy
+  
+  # 备份并解压
+  rm -rf .next.backup
+  [ -d .next ] && mv .next .next.backup
+  mkdir .next
+  tar xf /tmp/next-build.tar -C .next
+  rm /tmp/next-build.tar
+  
+  # 校验 BUILD_ID
+  if [ "$(cat .next/BUILD_ID)" != "$(cd /var/www/yuan-academy && cat .next/BUILD_ID 2>/dev/null || echo 'unknown')" ]; then
+    echo 'BUILD_ID 不匹配，回滚'
+    rm -rf .next
+    mv .next.backup .next
+    exit 1
+  fi
   
   # 如果 schema 有变化，需要重新生成 Prisma Client
   # npx prisma generate
@@ -117,7 +137,7 @@ ssh root@120.79.162.27 "
 | **RAM** | 1.6 GB |
 | **Swap** | 2 GB（已激活） |
 | **磁盘** | 40 GB（约 11GB 已用） |
-| **PM2 模式** | fork，单实例，256MB 内存上限 |
+| **PM2 模式** | fork，单实例，512MB 内存上限 |
 | **Node.js** | v20.x |
 | **端口** | 3001（Next.js）← nginx 代理 443（HTTPS） |
 
@@ -160,7 +180,11 @@ cp prisma/dev.db /var/backups/yuan-academy-$(date +%Y%m%d).db
 | GET | `/api/permissions/tree` | 权限树 |
 | GET/PUT | `/api/roles/{id}/permissions` | 角色权限分配 |
 | GET/PUT | `/api/roles/{id}/dataScope` | 数据权限配置 |
-| POST | `/api/admin/policy/parse` | 订货政策文本结构化解析 |
+| POST | `/api/admin/policy/parse` | 订货政策文本结构化解析（规则引擎） |
+| POST | `/api/admin/policy/ai-generate` | AI 生成政策结构化布局（super_admin，DeepSeek） |
+| GET | `/api/admin/policy/layout?brand=xxx` | 获取指定品牌的 AI 布局 |
+| PUT | `/api/admin/policy/layout` | 保存 AI 生成的品牌布局（super_admin） |
+| GET | `/showroom/data/policies.json` | 订货政策原始数据（14 品牌，11 字段） |
 
 ### 政策结构化解析示例
 
@@ -172,13 +196,14 @@ curl -X POST https://academy.yuanshowroom.cn/api/admin/policy/parse \
 
 ## 回滚方案
 
+部署脚本自动包含回滚：解压后 BUILD_ID 校验失败会自动恢复上一版本。
+
 ### 快速回滚（有备份时）
 
 ```bash
 ssh root@120.79.162.27 "
-  # 如果有 .next 备份
-  mv /var/www/yuan-academy/.next /var/www/yuan-academy/.next-broken
-  cp -a /var/www/yuan-academy/.next-backup /var/www/yuan-academy/.next
+  cd /var/www/yuan-academy
+  [ -d .next.backup ] && rm -rf .next && mv .next.backup .next
   pm2 restart yuan-academy
 "
 ```
@@ -205,3 +230,35 @@ bash scripts/deploy-local.sh
 | **.next 文件权限问题** | `chmod -R 755 /var/www/yuan-academy/.next` |
 | **登录 500** | 检查 `.env.local` 是否存在，Prisma Client 是否最新 |
 | **退出登录跳错** | 确认 logout API 返回 `307` 而非 `500` |
+| **xattr 警告刷屏** | 本地构建前 `xattr -cr .next` 清除 macOS 扩展属性（脚本已自动处理） |
+
+## CI/CD 自动部署（GitHub Actions）
+
+### 配一次就能 git push 自动上线
+
+#### 第一步：在 GitHub 仓库添加 Secrets
+
+把你的仓库 `vvJ1101/yuan-academy` 的 Settings → Secrets and variables → Actions → New repository secret 添加以下 4 个密钥：
+
+| 密钥名称 | 值（以下面的为准） |
+|----------|----------------|
+| `SERVER_HOST` | `120.79.162.27` |
+| `SERVER_USER` | `root` |
+| `SSH_PRIVATE_KEY` | 下面的私钥（从 `-----BEGIN OPENSSH PRIVATE KEY-----` 到 `-----END OPENSSH PRIVATE KEY-----` 整段复制） |
+| `DEEPSEEK_API_KEY` | 从本地 `.env.local` 复制 |
+| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
+
+**SSH 私钥（专用于部署，已在服务器上授权）：**
+
+| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
+
+**SSH 私钥（专用于部署，已在服务器上授权）：**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FAAAAJh7Wqg8e1qo
+PAAAAAtzc2gtZWQyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FA
+AAAEC9hpKFwpsSSQoq+fyhO+uEb2wfhPjBgTyjMGdFnK/xylq630GAsF9cJ+wwi16j4m4n
+Qkt+x5iR2C1v309YCrYUAAAAFWdpdGh1Yi1hY3Rpb25zLWRlcGxveQ==
+-----END OPENSSH PRIVATE KEY-----
+```

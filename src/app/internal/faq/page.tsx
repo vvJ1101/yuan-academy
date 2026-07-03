@@ -31,7 +31,7 @@ export default function FaqPage() {
     fetch('/api/departments')
       .then(r => r.json())
       .then(d => { if (Array.isArray(d)) setDepts(d) })
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
   }, [])
 
   useEffect(() => {

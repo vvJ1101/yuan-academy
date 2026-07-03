@@ -16,7 +16,7 @@ export function SmartRecommend() {
   useEffect(() => {
     fetchRecommendations()
       .then(d => setRecs(d.forYou?.length ? d.forYou : d.popular || []))
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
       .finally(() => setLoading(false))
   }, [])
 

@@ -42,6 +42,10 @@ screenlog.0
 ._*
 __MACOSX
 
+# Runtime policy data (written by API, not source)
+public/data/policies*.json
+public/showroom/data/policies*.json
+
 # User data
 用户素材/
 
@@ -50,3 +54,4 @@ __MACOSX
 tsconfig.tsbuildinfo
 CLAUDE.md
 AGENTS.md
+deploy-pkg/

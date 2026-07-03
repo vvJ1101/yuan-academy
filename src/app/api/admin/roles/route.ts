@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   await prisma.sysRole.create({
     data: { name: body.name, code: body.code, description: body.description || '', status: body.status === 'disabled' ? 0 : 1 },
   })
-  prisma.auditLog.create({ data: { userId: session!.id, action: "role:create" } }).catch(() => {})
+  prisma.auditLog.create({ data: { userId: session!.id, action: "role:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: '创建成功' })
 
 }

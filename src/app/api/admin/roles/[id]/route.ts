@@ -31,7 +31,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (body.description !== undefined) data.description = body.description
   if (body.status !== undefined) data.status = body.status === 'disabled' ? 0 : 1
   await prisma.sysRole.update({ where: { id: params.id }, data })
-  prisma.auditLog.create({ data: { userId: session!.id, action: "role:update" } }).catch(() => {})
+  prisma.auditLog.create({ data: { userId: session!.id, action: "role:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: '更新成功' })
 
 
@@ -47,7 +47,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ code: 400, message: '该角色下存在用户，无法删除' }, { status: 400 })
   }
   await prisma.sysRole.delete({ where: { id: params.id } })
-  prisma.auditLog.create({ data: { userId: session!.id, action: "role:delete" } }).catch(() => {})
+  prisma.auditLog.create({ data: { userId: session!.id, action: "role:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: '删除成功' })
 
 

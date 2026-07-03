@@ -16,7 +16,7 @@ export function ActivityFeed() {
   useEffect(() => {
     fetchActivity()
       .then(d => setItems((d.recentDocs || d.recentUpdates || []).slice(0, 5)))
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
       .finally(() => setLoading(false))
   }, [])
 

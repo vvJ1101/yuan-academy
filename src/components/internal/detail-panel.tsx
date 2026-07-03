@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Sparkles } from 'lucide-react'
+import { guessType } from '@/lib/helpers'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 interface Doc {
@@ -69,10 +70,7 @@ export function DetailPanel({ doc, onClose }: { doc: Doc | null; onClose: () => 
     )
   }
 
-  const fileName = doc.title.toLowerCase()
-  const fileType = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') ? 'excel'
-    : fileName.endsWith('.docx') || fileName.endsWith('.doc') ? 'word'
-    : fileName.endsWith('.pdf') ? 'pdf' : 'other'
+  const fileType = guessType(doc.title, doc.category)
   const fileTypeLabel = fileType === 'excel' ? 'Excel' : fileType === 'word' ? 'Word' : fileType === 'pdf' ? 'PDF' : '文档'
   const fileTypeIcon = fileType === 'excel' ? '/images/excel.png'
     : fileType === 'word' ? '/images/word.png'
@@ -150,7 +148,7 @@ export function DetailPanel({ doc, onClose }: { doc: Doc | null; onClose: () => 
               {aiExpanded ? '收起' : '展开全部'}
             </button>
           </div>
-          <div className={`text-[0.75rem] text-neutral-600 leading-relaxed overflow-y-auto ${aiExpanded ? 'flex-1' : 'line-clamp-3'} prose prose-sm max-w-none prose-headings:text-neutral-800 prose-p:my-1 prose-ul:my-1 prose-li:my-0`}>
+          <div className={`text-[0.75rem] text-neutral-600 leading-relaxed ${aiExpanded ? 'flex-1 overflow-y-auto' : 'line-clamp-3'} prose prose-sm max-w-none prose-headings:text-neutral-800 prose-p:my-1 prose-ul:my-1 prose-li:my-0`}>
             {(doc.condensedContent || doc.fullContent) ? (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {(doc.condensedContent || doc.fullContent || '').substring(0, aiExpanded ? 3000 : 400)}

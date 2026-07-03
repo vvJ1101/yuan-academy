@@ -37,18 +37,21 @@ function checkAdminRoute(session: any, pathname: string): boolean {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (!pathname.startsWith('/internal') && !pathname.startsWith('/api') && pathname !== '/login') {
+if (!pathname.startsWith('/internal') && !pathname.startsWith('/api') && pathname !== '/login') {
     return NextResponse.next()
   }
 
   if (PUBLIC.some(p => pathname.startsWith(p))) {
-    return NextResponse.next()
+    const response = NextResponse.next()
+    // Prevent proxy/CDN caching of public pages (avoids stale HTML)
+    response.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate')
+    return response
   }
 
   const sessionCookie = request.cookies.get('session')
   if (!sessionCookie?.value) {
     if (pathname.startsWith('/api')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: '请先登录', source: 'middleware' }, { status: 401 })
     }
     return NextResponse.redirect(new URL('/login', request.url))
   }

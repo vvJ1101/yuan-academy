@@ -13,13 +13,14 @@ export async function GET(req: NextRequest) {
   // Calculate actual storage usage from disk
   const storage = calcStorageUsage()
 
-  // Super admin sees everything
+  // Super admin sees everything — all folders get admin permission
   if (session.role === 'super_admin') {
     const folders = await prisma.folder.findMany({
       orderBy: { sortOrder: 'asc' },
       include: { _count: { select: { documents: true, children: true } } },
     })
-    return NextResponse.json({ folders, storage })
+    const foldersWithPerm = folders.map(f => ({ ...f, userPermission: 'admin' }))
+    return NextResponse.json({ folders: foldersWithPerm, storage })
   }
 
   // Other users: only see folders they have permission for (or their company's folders)

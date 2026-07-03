@@ -18,7 +18,7 @@ export async function PUT(req: NextRequest) {
     const p = join(d, 'policies.json')
     if (existsSync(p)) copyFileSync(p, join(d, 'policies.backup.json'))
     writeFileSync(p, JSON.stringify(policies, null, 2), 'utf-8')
-    writeFileSync(join(d, 'policies.updated.json'), JSON.stringify({ updatedAt: new Date().toISOString() }), 'utf-8')
+    writeFileSync(join(d, 'policies.updated.json'), JSON.stringify({ updatedAt: new Date().toISOString(), updatedBy: session?.name || '未知用户' }), 'utf-8')
   }
   return NextResponse.json({ ok: true, count: policies.length })
 }

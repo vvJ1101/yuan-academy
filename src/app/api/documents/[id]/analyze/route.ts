@@ -7,9 +7,10 @@ import { PHASE1_SYSTEM_PROMPT } from '@/lib/prompts/phase1-extract'
 import { validateOutput } from '@/lib/validator'
 
 function getClient() {
+  const proxyUrl = process.env.DEEPSEEK_PROXY_URL
   return new OpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY || '',
-    baseURL: 'https://api.deepseek.com/v1',
+    baseURL: proxyUrl ? proxyUrl.replace(/\/$/, '') + '/v1' : 'https://api.deepseek.com/v1',
   })
 }
 
@@ -240,7 +241,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await prisma.document.update({
         where: { id: doc.id },
         data: { extractedJson },
-      }).catch(() => {})
+      }).catch((err: any) => console.error("[AuditLogError]", err))
     }
 
     // ── Phase 2: Condensed Generation ──
@@ -280,7 +281,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       await prisma.document.update({
         where: { id: doc.id },
         data: { condensedContent: clean, displayMode: 'both' },
-      }).catch(() => {})
+      }).catch((err: any) => console.error("[AuditLogError]", err))
     }
 
     // Phase 3: Validate output quality

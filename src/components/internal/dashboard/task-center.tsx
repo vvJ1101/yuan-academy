@@ -20,7 +20,7 @@ export function TaskCenter() {
   useEffect(() => {
     fetchTasks()
       .then(d => setTasks(d.tasks.filter(t => t.priority === 'high' || t.priority === 'medium')))
-      .catch(() => {})
+      .catch((err: any) => console.warn("[SilentError]", err))
       .finally(() => setLoading(false))
   }, [])
 

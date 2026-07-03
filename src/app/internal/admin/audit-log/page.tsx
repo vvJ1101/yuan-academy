@@ -19,7 +19,7 @@ const ACTION_META: Record<string, { label: string; color: string; icon: any }> =
 }
 
 export default function AuditLogPage() {
-  const [logs, setLogs] = useState<any[]>([])
+  const [logs, setLogs] = useState<{id:string;userId:string;action:string;targetId?:string;targetType?:string;details?:string;createdAt:string;user?:{name:string;email:string}}[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {

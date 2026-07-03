@@ -12,9 +12,10 @@ const MAX_PER_HOUR = 30
 const rateLimit = new Map<string, { count: number; resetAt: number }>()
 
 function getClient() {
+  const proxyUrl = process.env.DEEPSEEK_PROXY_URL
   return new OpenAI({
     apiKey: process.env.DEEPSEEK_API_KEY || '',
-    baseURL: 'https://api.deepseek.com/v1',
+    baseURL: proxyUrl ? proxyUrl.replace(/\/$/, '') + '/v1' : 'https://api.deepseek.com/v1',
   })
 }
 

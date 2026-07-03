@@ -86,7 +86,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     if (audienceIds.length > 0) {
       await Promise.all(audienceIds.map((deptId: string) =>
         prisma.documentAudience.create({ data: { documentId: params.id, departmentId: deptId } })
-          .catch(() => {})
+          .catch((err: any) => console.error("[AuditLogError]", err))
       ))
     }
   }

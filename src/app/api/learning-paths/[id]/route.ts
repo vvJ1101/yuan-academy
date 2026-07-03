@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   })
 
   // Audit log
-  logEdit(session.id, params.id).catch(() => {})
+  logEdit(session.id, params.id).catch((err: any) => console.error("[AuditLogError]", err))
 
   // Resolve docs for response
   let docIdList: string[] = []

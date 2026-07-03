@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { PageHeader } from '@/components/internal/page-header'
+import { Modal } from 'antd'
 
 interface User {
   id: string; email: string; name: string; role: string
@@ -71,8 +72,8 @@ export default function UsersPage() {
     ? departments.filter(d => d.companyId === form.companyId)
     : departments
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(e?: React.FormEvent) {
+    if (e) e.preventDefault()
     setMessage('')
 
     if (editingId) {
@@ -192,9 +193,9 @@ export default function UsersPage() {
           <h1 className="text-[1.3rem] md:text-[1.5rem] font-semibold tracking-[-0.02em] text-neutral-900 mb-1">用户管理</h1>
           <p className="text-[0.8rem] md:text-[0.85rem] text-neutral-500 font-normal">{users.length} 个用户</p>
         </div>
-        <button onClick={() => { resetForm(); setShowForm(!showForm) }}
+        <button onClick={() => { resetForm(); setShowForm(true) }}
           className="px-4 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors">
-          {showForm ? '取消' : '新建用户'}
+          新建用户
         </button>
       </div>
 
@@ -228,75 +229,83 @@ export default function UsersPage() {
         </div>
       )}
 
-      {/* Create/Edit form */}
-      {showForm && (
-        <form onSubmit={handleSubmit} className="mb-8 p-5 bg-white border border-neutral-200 rounded-xl space-y-4">
-          <h2 className="text-[0.9rem] font-semibold text-neutral-900">{editingId ? '编辑用户' : '新建用户'}</h2>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">邮箱</label>
-              <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal"
-                required disabled={!!editingId} />
+      {/* Create/Edit Modal */}
+      <Modal
+        title={editingId ? '编辑用户' : '新建用户'}
+        open={showForm}
+        onCancel={() => resetForm()}
+        onOk={() => handleSubmit()}
+        okText={editingId ? '保存修改' : '创建用户'}
+        destroyOnClose
+        width={560}
+      >
+        <form onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">邮箱</label>
+                <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal"
+                  required disabled={!!editingId} />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">姓名</label>
+                <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal" />
+              </div>
             </div>
-            <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">姓名</label>
-              <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal" />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">密码{editingId ? '（留空不修改）' : ''}</label>
+                <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal"
+                  required={!editingId} />
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">角色</label>
+                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal">
+                  {Object.entries(roleLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
             </div>
-            <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">密码{editingId ? '（留空不修改）' : ''}</label>
-              <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal"
-                required={!editingId} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">公司</label>
+                <select value={form.companyId}
+                  onChange={e => setForm({ ...form, companyId: e.target.value, departmentId: '' })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal">
+                  <option value="">无公司</option>
+                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">部门</label>
+                <select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}
+                  className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal">
+                  <option value="">无部门</option>
+                  {filteredDepts.map(d => <option key={d.id} value={d.id}>{d.name}{d.company ? ` (${d.company.name})` : ''}</option>)}
+                </select>
+              </div>
             </div>
+            {/* Multi-company selector */}
             <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">角色</label>
-              <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal">
-                {Object.entries(roleLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">公司</label>
-              <select
-                value={form.companyId}
-                onChange={e => setForm({ ...form, companyId: e.target.value, departmentId: '' })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal"
-              >
-                <option value="">无公司</option>
-                {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">部门</label>
-              <select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}
-                className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] bg-white focus:outline-none focus:border-neutral-900 font-normal">
-                <option value="">无部门</option>
-                {filteredDepts.map(d => <option key={d.id} value={d.id}>{d.name}{d.company ? ` (${d.company.name})` : ''}</option>)}
-              </select>
+              <label className="block text-[0.7rem] font-medium text-neutral-700 mb-2">所属公司（可多选）</label>
+              <div className="flex flex-wrap gap-2">
+                {companies.map(c => (
+                  <label key={c.id} className="flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 rounded-lg text-[0.78rem] cursor-pointer hover:border-neutral-400 transition-colors">
+                    <input type="checkbox" checked={companyIds.includes(c.id)} onChange={e=>{
+                      if(e.target.checked) setCompanyIds([...companyIds,c.id])
+                      else setCompanyIds(companyIds.filter(id=>id!==c.id))
+                    }} className="w-3 h-3" />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
-          {/* Multi-company selector */}
-          <div>
-            <label className="block text-[0.7rem] font-medium text-neutral-700 mb-2">所属公司（可多选）</label>
-            <div className="flex flex-wrap gap-2">
-              {companies.map(c => (
-                <label key={c.id} className="flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 rounded-lg text-[0.78rem] cursor-pointer hover:border-neutral-400 transition-colors">
-                  <input type="checkbox" checked={companyIds.includes(c.id)} onChange={e=>{
-                    if(e.target.checked) setCompanyIds([...companyIds,c.id])
-                    else setCompanyIds(companyIds.filter(id=>id!==c.id))
-                  }} className="w-3 h-3" />
-                  {c.name}
-                </label>
-              ))}
-            </div>
-          </div>
-          <button type="submit" className="px-5 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors">
-            {editingId ? '保存修改' : '创建用户'}
-          </button>
         </form>
-      )}
+      </Modal>
 
       {/* User list */}
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">

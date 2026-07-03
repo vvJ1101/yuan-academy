@@ -14,7 +14,7 @@ export default function FavoritesPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/bookmarks').then(r=>r.json()).then(d=>{setBookmarks(d.bookmarks||[])}).catch(()=>{}).finally(()=>setLoading(false))
+    fetch('/api/bookmarks').then(r=>r.json()).then(d=>{setBookmarks(d.bookmarks||[])}).catch((err: any) => console.warn("[SilentError]", err)).finally(()=>setLoading(false))
   }, [])
 
   if (loading) return <div className="flex justify-center py-20"><div className="w-6 h-6 border-2 border-neutral-200 border-t-blue-600 rounded-full animate-spin mx-auto" /></div>

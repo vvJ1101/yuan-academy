@@ -28,7 +28,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const body = await req.json()
   const dataScope = SCOPE_MAP[body.dataScope] || 2
   // 记录审计日志（必须在 return 之前）
-  prisma.auditLog.create({ data: { userId: session!.id, action: "role:datascope" } }).catch(() => {})
+  prisma.auditLog.create({ data: { userId: session!.id, action: "role:datascope" } }).catch((err: any) => console.error("[AuditLogError]", err))
   await prisma.sysRole.update({
     where: { id: params.id },
     data: { dataScope, customDeptIds: JSON.stringify(body.customDeptIds || []) },
