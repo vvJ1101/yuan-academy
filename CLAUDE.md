@@ -192,7 +192,7 @@
 | **权限体系** | super_admin > dept_admin > editor > viewer |
 | **数据库** | `prisma/dev.db`（SQLite） |
 | **AI 引擎** | DeepSeek API（`DEEPSEEK_API_KEY` 在 `.env.local`） |
-| **部署前** | `npx prisma db push` + `npx tsx scripts/fts-migrate.ts` |
+| **部署前** | `npx prisma db push` + `npx tsx scripts/fts-migrate.ts` / 部署: `bash scripts/deploy-local.sh` 或 `git push origin main`（自动 CI/CD） |
 - `src/types/dashboard.ts` — 仪表盘共享类型（StatsData / ASR / UserInfo，6 个组件依赖）
 | **测试账号** | `admin@yuanshowroom.com` / `admin123` |
 
@@ -255,6 +255,22 @@
 
 服务器账号密码、部署流程、重启命令等 → 见 **[DEPLOY.md](DEPLOY.md)**
 
+
+### CI/CD 自动部署（GitHub Actions）
+
+项目已配置 GitHub Actions 自动部署流程，当你推送到 `main` 分支时自动触发：
+1. **Build** — 服务器上执行 `npm run build`（生产环境）
+2. **Deploy** — 构建产物自动部署到生产服务器
+
+相关文件：
+- `.github/workflows/deploy.yml` — GitHub Actions 工作流定义
+- `scripts/deploy-local.sh` — 本地手动部署脚本（备用）
+
+> 如果改用 `git push origin main` 自动触发部署，确保仓库 Settings → Secrets and variables → Actions 已正确配置以下 Secrets：
+> `SERVER_HOST`、`SERVER_USER`、`SSH_PRIVATE_KEY`、`DEEPSEEK_API_KEY`、`JWT_SECRET
+> 
+> 详情见 **[DEPLOY.md](DEPLOY.md)** 的 CI/CD 章节
+
 ### 其他 Codex 会话须知
 
 如果其他 Codex 会话需要处理本项目，请让它们阅读本文件的全部内容后开始工作。  
@@ -265,6 +281,7 @@
 # 其他 Codex 会话启动时应读取的文件清单
 # 1. CLAUDE.md — AI 协作行为守则（本文件）
 # 2. DEPLOY.md — 部署运维手册
-# 3. scripts/preflight.sh — 部署前预检脚本
-# 4. scripts/server-deploy.sh — 服务器端部署脚本
+# 3. .github/workflows/deploy.yml — GitHub Actions CI/CD
+# 4. scripts/preflight.sh — 部署前预检脚本
+# 5. scripts/server-deploy.sh — 服务器端部署脚本
 ```

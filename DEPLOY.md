@@ -250,8 +250,6 @@ bash scripts/deploy-local.sh
 
 **SSH 私钥（专用于部署，已在服务器上授权）：**
 
-| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
-
 **SSH 私钥（专用于部署，已在服务器上授权）：**
 ```
 -----BEGIN OPENSSH PRIVATE KEY-----
