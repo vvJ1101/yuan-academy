@@ -6,7 +6,7 @@ import { canReadDocument } from '@/lib/permissions/documents'
 import { getDocumentPermission } from '@/lib/permissions/folders'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Verify document exists and user has read permission
