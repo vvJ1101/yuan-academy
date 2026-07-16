@@ -7,6 +7,7 @@ import {
   verifySessionToken,
   type SessionClaims,
 } from '@/lib/session'
+import { canEditPolicy } from '@/lib/policy-access'
 
 export interface SessionUser extends SessionClaims {}
 
@@ -61,16 +62,7 @@ export function canManageUsers(session: SessionUser): boolean {
   return session.role === 'super_admin'
 }
 
-/** super_admin OR (时胜 + 品牌部 + dept_admin) */
-export function canEditPolicy(session: SessionUser): boolean {
-  if (session.role === 'super_admin') return true
-  if (session.role === 'dept_admin' &&
-      session.companyName === '时胜' &&
-      session.departmentName === '品牌部') {
-    return true
-  }
-  return false
-}
+export { canEditPolicy }
 
 // ── Document permissions → migrated to @/lib/permissions/documents ──
 // Import from there: canReadDocument, canEditDocument, canDeleteDocument, buildDocumentWhere
