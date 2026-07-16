@@ -46,6 +46,7 @@ __MACOSX
 # Runtime policy data (written by API, not source)
 public/data/policies*.json
 public/showroom/data/policies*.json
+data/private/policies/policies*.json
 
 # User data
 用户素材/
