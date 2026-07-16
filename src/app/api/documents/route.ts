@@ -73,11 +73,15 @@ export async function GET(req: NextRequest) {
         }
       }
     }
-    // Read actual file size from disk
     let fileSize: number | null = null
     try {
-      const docxPath = join(process.cwd(), 'public', 'uploads', 'documents', doc.id, 'original.docx')
-      fileSize = statSync(docxPath).size
+      const docDir = join(process.cwd(), 'public', 'uploads', 'documents', doc.id)
+      for (const name of ['original.docx', 'original.pptx']) {
+        try {
+          fileSize = statSync(join(docDir, name)).size
+          break
+        } catch { /* try next */ }
+      }
     } catch { fileSize = null }
     const { condensedContent, fullContent, ...rest } = doc
     return { ...rest, summary, userPermission, fileSize, hasAiSummary: !!condensedContent }
@@ -99,8 +103,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
 
-  const { parseDocx } = await import('@/lib/parser')
   const buffer = Buffer.from(await file.arrayBuffer())
+  const fileName = file.name || title
+  const isPpt = /\.pptx?$/i.test(fileName)
 
   const doc = await prisma.document.create({
     data: {
@@ -115,11 +120,41 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  // Save original DOCX for download
   const docDir = join(process.cwd(), 'public', 'uploads', 'documents', doc.id)
   if (!existsSync(docDir)) mkdirSync(docDir, { recursive: true })
-  try { writeFileSync(join(docDir, 'original.docx'), buffer) } catch {}
+  const ext = isPpt ? 'pptx' : 'docx'
+  try { writeFileSync(join(docDir, `original.${ext}`), buffer) } catch {}
 
+  if (isPpt) {
+    // ── PPT/PPTX → PDF conversion ──
+    const { convertPptToPdf } = await import('@/lib/ppt-converter')
+    const result = await convertPptToPdf(buffer, doc.id, docDir)
+    // Handle audience department assignments
+    const audienceIds = (formData.get('audienceIds') as string)?.split(',').filter(Boolean) || []
+    if (audienceIds.length > 0) {
+      await Promise.all(audienceIds.map((deptId: string) =>
+        prisma.documentAudience.create({ data: { documentId: doc.id, departmentId: deptId } })
+          .catch((err: any) => console.error("[AuditLogError]", err))
+      ))
+    }
+    const fullContent = result.success
+      ? `> 该文档为 PPT 文件，已在网页上转换为 PDF 格式，可直接在浏览器中预览。\n\n[查看 PDF](/uploads/documents/${doc.id}/output.pdf)`
+      : `> PPT 转换时出现异常: ${result.error}\n\n请下载原始文件后本地查看。`
+    const updated = await prisma.document.update({
+      where: { id: doc.id },
+      data: {
+        fullContent,
+        displayMode: result.success ? 'pdf' : 'full',
+      },
+    })
+    return NextResponse.json({
+      ...updated,
+      conversion: result.success ? 'ok' : ('failed: ' + result.error),
+    }, { status: 201 })
+  }
+
+  // ── DOCX → Markdown ──
+  const { parseDocx } = await import('@/lib/parser')
   const result = await parseDocx(buffer, doc.id)
   const fullContent = result.markdown.substring(0, 100000)
 

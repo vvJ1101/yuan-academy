@@ -192,118 +192,93 @@ export default function DocumentDetailPage() {
         </h1>
         <p className="text-[0.78rem] md:text-[0.82rem] text-neutral-400">
           {doc.author?.name || '未知'} · {new Date(doc.updatedAt).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}
+
         </p>
       </div>
 
       {/* ── Content area ── */}
       {tab === 'preview' ? (
         /* ── Preview mode ── */
-        <article className="doc-content max-w-none overflow-x-auto">
-          <div className="prose prose-neutral max-w-none
-            prose-p:text-[15px] sm:prose-p:text-[0.92rem] prose-p:leading-relaxed prose-p:text-neutral-600 prose-p:font-normal prose-p:mb-4
-            prose-h1:text-[1.25rem] sm:prose-h1:text-[1.35rem] prose-h1:font-semibold prose-h1:text-neutral-800 prose-h1:mt-10 prose-h1:mb-4 prose-h1:pb-2 prose-h1:border-b-2 prose-h1:border-neutral-200
-            prose-h2:text-[1.1rem] sm:prose-h2:text-[1.15rem] prose-h2:font-semibold prose-h2:text-neutral-800 prose-h2:mt-8 prose-h2:mb-3
-            prose-h3:text-[0.95rem] sm:prose-h3:text-[1rem] prose-h3:font-semibold prose-h3:text-neutral-700 prose-h3:mt-6 prose-h3:mb-2 prose-h3:pl-3 prose-h3:border-l-[3px] prose-h3:border-neutral-300
-            prose-h4:text-[0.85rem] sm:prose-h4:text-[0.9rem] prose-h4:font-semibold prose-h4:text-neutral-700 prose-h4:mt-4 prose-h4:mb-2 prose-h4:px-3 prose-h4:py-1.5 prose-h4:bg-neutral-100 prose-h4:rounded
-            prose-ul:mb-6 prose-ul:space-y-1
-            prose-ol:mb-6 prose-ol:space-y-2 prose-ol:list-decimal prose-ol:list-inside prose-ol:marker:text-neutral-400
-            prose-li:text-[15px] sm:prose-li:text-[0.92rem] prose-li:leading-[1.8] prose-li:text-neutral-600 prose-li:pl-1
-            prose-strong:font-semibold prose-strong:text-neutral-800
-            prose-table:my-6 prose-table:rounded-lg prose-table:border prose-table:border-neutral-200
-            prose-th:border-b prose-th:border-neutral-200 prose-th:px-4 prose-th:py-2.5 prose-th:bg-neutral-50 prose-th:text-left prose-th:font-semibold prose-th:text-neutral-700 prose-th:text-[0.78rem]
-            prose-td:border-b prose-td:border-neutral-100 prose-td:px-4 prose-td:py-2.5 prose-td:text-neutral-600
-            prose-img:w-full prose-img:max-w-full prose-img:h-auto prose-img:rounded-lg prose-img:border prose-img:border-neutral-200 prose-img:shadow-sm
-            prose-code:bg-neutral-100 prose-code:text-neutral-600 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.85rem] prose-code:font-mono
-          ">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {displayContent || '_暂无内容_'}
-            </ReactMarkdown>
+        doc.displayMode === 'pdf' ? (
+          /* PDF 文档：嵌入 PDF 阅读器 */
+          <div className="w-full rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
+            <iframe
+              src={`/uploads/documents/${doc.id}/output.pdf`}
+              className="w-full h-[85vh]"
+              style={{ border: 'none' }}
+              title={doc.title}
+            />
+            <div className="flex items-center justify-between px-4 py-2.5 bg-white border-t border-neutral-100">
+              <span className="text-[0.78rem] text-neutral-400 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                PDF 文档
+              </span>
+              <a
+                href={`/uploads/documents/${doc.id}/output.pdf`}
+                download
+                className="text-[0.78rem] text-[#2563EB] hover:text-blue-700 font-medium"
+              >
+                下载 PDF
+              </a>
+            </div>
           </div>
-        </article>
+        ) : (
+          /* Markdown 文档：ReactMarkdown 渲染 */
+          <article className="doc-content max-w-none overflow-x-auto">
+            <div className="prose prose-neutral max-w-none
+              prose-p:text-[15px] sm:prose-p:text-[0.92rem] prose-p:leading-relaxed prose-p:text-neutral-600 prose-p:font-normal prose-p:mb-4
+              prose-h1:text-[1.25rem] sm:prose-h1:text-[1.35rem] prose-h1:font-semibold prose-h1:text-neutral-800 prose-h1:mt-10 prose-h1:mb-4 prose-h1:pb-2 prose-h1:border-b-2 prose-h1:border-neutral-200
+              prose-h2:text-[1.1rem] sm:prose-h2:text-[1.15rem] prose-h2:font-semibold prose-h2:text-neutral-800 prose-h2:mt-8 prose-h2:mb-3
+              prose-h3:text-[0.95rem] sm:prose-h3:text-[1rem] prose-h3:font-semibold prose-h3:text-neutral-700 prose-h3:mt-6 prose-h3:mb-2 prose-h3:pl-3 prose-h3:border-l-[3px] prose-h3:border-neutral-300
+              prose-h4:text-[0.85rem] sm:prose-h4:text-[0.9rem] prose-h4:font-semibold prose-h4:text-neutral-700 prose-h4:mt-4 prose-h4:mb-2 prose-h4:px-3 prose-h4:py-1.5 prose-h4:bg-neutral-100 prose-h4:rounded
+              prose-ul:mb-6 prose-ul:space-y-1
+              prose-ol:mb-6 prose-ol:space-y-2 prose-ol:list-decimal prose-ol:list-inside prose-ol:marker:text-neutral-400
+              prose-li:text-[15px] sm:prose-li:text-[0.92rem] prose-li:leading-[1.8] prose-li:text-neutral-600 prose-li:pl-1
+              prose-strong:font-semibold prose-strong:text-neutral-800
+              prose-table:my-6 prose-table:rounded-lg prose-table:border prose-table:border-neutral-200
+              prose-th:border-b prose-th:border-neutral-200 prose-th:px-4 prose-th:py-2.5 prose-th:bg-neutral-50 prose-th:text-left prose-th:font-semibold prose-th:text-neutral-700 prose-th:text-[0.78rem]
+              prose-td:border-b prose-td:border-neutral-100 prose-td:px-4 prose-td:py-2.5 prose-td:text-neutral-600
+              prose-img:w-full prose-img:max-w-full prose-img:h-auto prose-img:rounded-lg prose-img:border prose-img:border-neutral-200 prose-img:shadow-sm
+              prose-code:bg-neutral-100 prose-code:text-neutral-600 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-[0.85rem] prose-code:font-mono
+            ">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {displayContent || '_暂无内容_'}
+              </ReactMarkdown>
+            </div>
+          </article>
+        )
       ) : (
         /* ── Edit mode ── */
         <div className="space-y-4">
           <textarea
             value={editContent}
             onChange={e => setEditContent(e.target.value)}
-            className="w-full min-h-[50vh] px-4 py-4 text-[15px] sm:text-[0.92rem] leading-relaxed text-neutral-700 font-normal border border-neutral-300 rounded-xl focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-200 resize-y bg-white"
+            className="w-full min-h-[50vh] px-4 py-4 text-[15px] sm:text-[0.92rem] leading-relaxed text-neutral-700 font-normal border border-neutral-200 rounded-xl focus:outline-none focus:border-neutral-900 focus:ring-2 focus:ring-neutral-200 resize-y bg-white"
             placeholder="在此编辑 Markdown 内容..."
           />
-
-          {/* Remark + Save */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <input
-              type="text"
-              value={remark}
-              onChange={e => setRemark(e.target.value)}
-              placeholder="更新说明（可选）"
-              className="flex-1 min-h-[44px] px-3 py-2 text-[0.85rem] border border-neutral-200 rounded-lg focus:outline-none focus:border-neutral-400 transition-colors"
-            />
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="min-h-[44px] px-6 py-2.5 bg-[#2563EB] text-white text-[0.82rem] font-medium rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
-            >
-              {saving ? (
-                <><Loader2 size={14} strokeWidth={1.5} className="animate-spin" /> 保存中...</>
-              ) : saved ? (
-                <><Check size={14} strokeWidth={1.5} /> 已保存</>
-              ) : (
-                <><Save size={14} strokeWidth={1.5} /> 保存</>
-              )}
-            </button>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex-1">
+              <input
+                type="text"
+                value={remark}
+                onChange={e => setRemark(e.target.value)}
+                placeholder="修改备注（可选）"
+                className="w-full px-4 py-2.5 text-[0.82rem] border border-neutral-200 rounded-lg focus:outline-none focus:border-neutral-900 bg-white"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              {saved && <Check size={16} className="text-emerald-500" />}
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-6 py-2.5 bg-[#2563EB] text-white text-[0.82rem] font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
-
           {error && (
             <p className="text-[0.82rem] text-red-500">{error}</p>
-          )}
-
-          {/* Edit hint */}
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <p className="text-[0.72rem] text-amber-700 font-normal">
-              编辑内容使用 Markdown 格式。保存后会自动创建历史版本记录。修改后直接覆写正文内容，不会触发文档解析管线。
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ── History panel ── */}
-      {(tab === 'preview') && (
-        <div className="mt-10 pt-6 border-t border-neutral-200">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="flex items-center gap-2 text-[0.82rem] font-medium text-neutral-500 hover:text-neutral-800 transition-colors min-h-[44px]"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-            </svg>
-            编辑历史 {history.length > 0 && <span className="text-[0.68rem] text-neutral-400 bg-neutral-100 px-1.5 py-0.5 rounded">{history.length}</span>}
-            <span className="text-[0.68rem] text-neutral-300">{showHistory ? '▲' : '▼'}</span>
-          </button>
-
-          {showHistory && (
-            <div className="mt-4 space-y-3">
-              {!historyLoaded ? (
-                <p className="text-[0.78rem] text-neutral-400">加载中...</p>
-              ) : history.length === 0 ? (
-                <p className="text-[0.78rem] text-neutral-400">暂无编辑记录。保存修改后会自动生成版本快照。</p>
-              ) : (
-                history.map((h: any, idx: number) => (
-                  <details key={h.id || idx} className="group border border-neutral-200 rounded-xl overflow-hidden">
-                    <summary className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-neutral-50 list-none">
-                      <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 shrink-0" />
-                      <span className="text-[0.78rem] text-neutral-700 font-medium">{h.editorName}</span>
-                      <span className="text-[0.72rem] text-neutral-400">{new Date(h.createdAt).toLocaleString('zh-CN')}</span>
-                      {h.remark && <span className="text-[0.72rem] text-neutral-400 bg-neutral-100 px-2 py-0.5 rounded">{(h.remark as string).slice(0, 50)}</span>}
-                      <span className="text-[0.65rem] text-neutral-300 ml-auto">{idx === history.length - 1 ? '初始版本' : '#' + (history.length - idx)}</span>
-                    </summary>
-                    <div className="px-4 pb-4 border-t border-neutral-100 pt-3">
-                      <pre className="text-[0.78rem] text-neutral-600 whitespace-pre-wrap font-normal leading-relaxed max-h-[300px] overflow-y-auto bg-neutral-50 p-3 rounded-lg">{h.content}</pre>
-                    </div>
-                  </details>
-                ))
-              )}
-            </div>
           )}
         </div>
       )}

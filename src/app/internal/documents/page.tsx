@@ -36,7 +36,7 @@ const PERM_LEVEL: Record<string, number> = { view: 1, edit: 2, delete: 3, admin:
 
 function fmtSize(d: Doc): string { if (d.fileSize) { const b = d.fileSize; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` } const c = d.fullContent || d.condensedContent || ''; const b = new Blob([c]).size; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` }
 function permOk(p: string|null, r: string): boolean { if(!p) return false; return (PERM_LEVEL[p]||0) >= (PERM_LEVEL[r]||0) }
-function fileIcon(d: Doc) { const t = guessType(d.title, d.category); if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />; return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> }
+function fileIcon(d: Doc) { const t = guessType(d.title, d.category); if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'ppt') return <img src="/images/ppt.png" alt="" onError={e => { (e.target as HTMLImageElement).style.display='none'; (e.target as HTMLImageElement).parentElement!.innerHTML='<div class=\"w-6 h-6 rounded flex items-center justify-center text-[0.5rem] font-bold text-orange-600 bg-orange-50 shrink-0\">PPT</div>' }} className="w-6 h-6 object-contain shrink-0" />; return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> }
 
 // ═══════════════════════════════════════════
 function DocumentsContent() {
@@ -214,6 +214,32 @@ function DocumentsContent() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
+      {/* ═══ Left Sidebar: Folder Tree ═══ */}
+      <div className="w-64 shrink-0 border-r border-neutral-200 bg-white flex flex-col overflow-y-auto">
+        <div className="px-4 py-3 border-b border-neutral-100 flex items-center justify-between sticky top-0 bg-white z-10">
+          <span className="text-[0.82rem] font-semibold text-neutral-800">知识空间</span>
+          <button onClick={() => setNewSpaceOpen(true)} className="text-[0.72rem] text-[#2563EB] hover:text-blue-700 font-medium">+ 新建</button>
+        </div>
+        <div className="flex-1 px-2 py-2 space-y-0.5">
+          {spaces.length === 0 ? (
+            <p className="text-[0.78rem] text-neutral-400 px-2 py-4 text-center">暂无知识空间</p>
+          ) : spaces.map(f => (
+            <SidebarNode key={f.id} f={f} folders={folders} lv={0}
+              selId={spaceFilter || folderFilter}
+              onSelect={(id: string, isSpace: boolean) => {
+                if (isSpace) { setSpaceFilter(id); setFolderFilter('') }
+                else { setFolderFilter(id) }
+              }}
+              onContextMenu={(e: React.MouseEvent, id: string, isSpace: boolean) => {
+                e.preventDefault(); e.stopPropagation()
+                const sp = folders.find(x => x.id === id)
+                if (isSpace && sp) setSCtx({ x: e.clientX, y: e.clientY, space: sp })
+                else if (sp) setFCtx({ x: e.clientX, y: e.clientY, folder: sp })
+              }}
+            />
+          ))}
+        </div>
+      </div>
       {/* ═══ Center: File List ═══ */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FA]">
         {/* ═══ Unified Header: Breadcrumb + Toolbar (two rows, no divider) ═══ */}
@@ -297,10 +323,9 @@ function DocumentsContent() {
 
         {/* File Table */}
         <div className="flex-1 overflow-y-auto" style={{ minHeight: '260px' }}>
-          {!currentSpace ? (
+         {!currentSpace ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
-              <Book size={48} strokeWidth={1.5} className="mb-4 opacity-20" />
-              <p className="text-[0.9rem] text-neutral-500">选择左侧知识空间开始浏览</p>
+              <p className="text-[0.85rem] text-neutral-400">请从左侧选择一个知识空间</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -440,7 +465,7 @@ function DocumentsContent() {
             <div className="grid grid-cols-4 gap-2">
               {recDocs.slice(0, 4).map((item: any, i: number) => {
                 const t = (item.title||'').toLowerCase()
-                const imgType = t.endsWith('.xlsx')||t.endsWith('.xls') ? 'excel' : t.endsWith('.docx')||t.endsWith('.doc') ? 'word' : 'pdf'
+                const imgType = t.endsWith('.xlsx')||t.endsWith('.xls') ? 'excel' : t.endsWith('.docx')||t.endsWith('.doc') ? 'word' : t.endsWith('.pptx')||t.endsWith('.ppt') ? 'ppt' : 'pdf'
                 return (
                 <Link key={item.id || i} href={`/internal/docs/${item.audienceSlug || 'doc'}/${encodeURIComponent(item.slug || '')}`}
                   className="flex items-center gap-2 p-2 bg-neutral-50 rounded-lg border border-neutral-100 hover:border-[#2563EB]/30 hover:bg-white transition-colors no-underline group">
@@ -486,7 +511,7 @@ function DocumentsContent() {
       <DetailPanel doc={selectedDoc} onClose={() => setSelectedDoc(null)} />
 
       {/* ═══ Hidden inputs + Modals ═══ */}
-      <input type="file" id="replaceFileInput" accept=".docx" className="hidden" onChange={async e => { const f = e.target.files?.[0]; const target = replaceDoc || ctxMenu?.doc; if (!f || !target) return; const fd = new FormData(); fd.append('file', f); const res = await fetch(`/api/documents/${target.id}/replace`, { method: 'POST', body: fd }); if (res.ok) { refresh(); setToastMsg('覆盖上传成功'); setToastType('success'); setTimeout(() => setToastMsg(''), 3000) } else { const d = await res.json().catch(() => ({})); setToastMsg(d.error || '覆盖失败'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000) } e.target.value = ''; setCtxMenu(null); setReplaceDoc(null) }} />
+      <input type="file" id="replaceFileInput" accept=".docx,.pptx,.ppt" className="hidden" onChange={async e => { const f = e.target.files?.[0]; const target = replaceDoc || ctxMenu?.doc; if (!f || !target) return; const fd = new FormData(); fd.append('file', f); const res = await fetch(`/api/documents/${target.id}/replace`, { method: 'POST', body: fd }); if (res.ok) { refresh(); setToastMsg('覆盖上传成功'); setToastType('success'); setTimeout(() => setToastMsg(''), 3000) } else { const d = await res.json().catch(() => ({})); setToastMsg(d.error || '覆盖失败'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000) } e.target.value = ''; setCtxMenu(null); setReplaceDoc(null) }} />
 
       {/* Context Menus */}
       {ctxMenu && (() => {
@@ -523,8 +548,23 @@ function DocumentsContent() {
         if (permOk(p, 'delete')) {
           items.push({ label: '删除', onClick: () => deleteDoc(ctxMenu.doc), danger: true })
         }
-        return <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} items={items} />
-      })()}
+       return <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} items={items} />
+     })()}
+      {sCtx && (
+        <ContextMenu x={sCtx.x} y={sCtx.y} onClose={() => setSCtx(null)} items={[
+          { label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, sCtx.space.id) } },
+          { label: '重命名', onClick: () => renameFolder(sCtx.space) },
+          { label: '新建知识空间', onClick: () => setNewSpaceOpen(true) },
+          { label: '删除', onClick: () => deleteFolder(sCtx.space), danger: true },
+        ]} />
+      )}
+      {fCtx && (
+        <ContextMenu x={fCtx.x} y={fCtx.y} onClose={() => setFCtx(null)} items={[
+          { label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, fCtx.folder.id) } },
+          { label: '重命名', onClick: () => renameFolder(fCtx.folder) },
+          { label: '删除', onClick: () => deleteFolder(fCtx.folder), danger: true },
+        ]} />
+      )}
 
       {/* Modals */}
       <Dialog open={showUpload} onOpenChange={(open) => { if (!open) setShowUpload(false) }}>
@@ -537,7 +577,7 @@ function DocumentsContent() {
             <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">存放位置</label><p className="text-[0.85rem] text-neutral-700 py-2 inline-flex items-center gap-1.5"><Folder size={15} strokeWidth={1.5} />{uploadTargetName}</p></div>
             <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">分类</label><select value={upCat} onChange={e => setUpCat(e.target.value)} className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-[0.85rem]">{Object.entries(CAT_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select></div>
             <div className="flex items-center gap-2"><input type="checkbox" checked={upAiParse} onChange={e => setUpAiParse(e.target.checked)} id="aip" /><label htmlFor="aip" className="text-[0.8rem] text-neutral-600">AI 智能解析</label></div>
-            <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">文件 (.docx)</label><input type="file" accept=".docx" onChange={e => { const f = e.target.files?.[0]; if (f) { setUpFile(f); if (!upTitle) setUpTitle(f.name.replace(/\.(docx|doc)$/i, '')) } }} className="w-full text-[0.82rem] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-[#2563EB] file:text-white" required /></div>
+            <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">文件 (.docx / .pptx)</label><input type="file" accept=".docx,.pptx,.ppt" onChange={e => { const f = e.target.files?.[0]; if (f) { setUpFile(f); if (!upTitle) setUpTitle(f.name.replace(/\.(docx|doc|pptx|ppt)$/i, '')) } }} className="w-full text-[0.82rem] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-[#2563EB] file:text-white" required /></div>
             {upMsg && <div className={`text-[0.78rem] px-3 py-2 rounded-lg ${upStatus === 'done' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>{upMsg}</div>}
             <div className="flex gap-3 pt-2"><button type="button" onClick={() => setShowUpload(false)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">取消</button><button type="submit" disabled={upStatus === 'uploading'} className="flex-1 px-4 py-2 bg-[#2563EB] text-white text-[0.82rem] rounded-lg hover:bg-blue-600 disabled:opacity-50">{upStatus === 'uploading' ? '上传中...' : '上传'}</button></div>
           </form>
@@ -612,7 +652,46 @@ function DocumentsContent() {
 function MTN({ f, folders, lv, sel, onClick }: { f: Folder; folders: Folder[]; lv: number; sel: string | null; onClick: (id: string) => void }) {
   const [ex, setEx] = useState(true)
   const kids = folders.filter(x => x.parentId === f.id)
-  return <div><button onClick={() => { onClick(f.id); if (kids.length > 0) setEx(!ex) }} className={`w-full text-left px-3 py-2 text-[0.82rem] rounded-md transition-colors flex items-center gap-2 ${sel === f.id ? 'bg-[#2563EB] text-white' : 'text-neutral-600 hover:bg-neutral-50'}`} style={{ paddingLeft: `${12 + lv * 16}px` }}>{kids.length > 0 ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`shrink-0 transition-transform ${ex ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6" /></svg> : <span className="w-[10px] shrink-0" />}<span className="inline-flex items-center gap-1"><Folder size={14} strokeWidth={1.5} /> {f.name}</span></button>{ex && kids.map(c => <MTN key={c.id} f={c} folders={folders} lv={lv + 1} sel={sel} onClick={onClick} />)}</div>
+ return <div><button onClick={() => { onClick(f.id); if (kids.length > 0) setEx(!ex) }} className={`w-full text-left px-3 py-2 text-[0.82rem] rounded-md transition-colors flex items-center gap-2 ${sel === f.id ? 'bg-[#2563EB] text-white' : 'text-neutral-600 hover:bg-neutral-50'}`} style={{ paddingLeft: `${12 + lv * 16}px` }}>{kids.length > 0 ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`shrink-0 transition-transform ${ex ? 'rotate-90' : ''}`}><polyline points="9 18 15 12 9 6" /></svg> : <span className="w-[10px] shrink-0" />}<span className="inline-flex items-center gap-1"><Folder size={14} strokeWidth={1.5} /> {f.name}</span></button>{ex && kids.map(c => <MTN key={c.id} f={c} folders={folders} lv={lv + 1} sel={sel} onClick={onClick} />)}</div>
+}
+
+// ── Sidebar Tree Node ──
+function SidebarNode({ f, folders, lv, selId, onSelect, onContextMenu }: {
+  f: Folder; folders: Folder[]; lv: number; selId: string | null;
+  onSelect: (id: string, isSpace: boolean) => void;
+  onContextMenu: (e: React.MouseEvent, id: string, isSpace: boolean) => void;
+}) {
+  const [ex, setEx] = useState(true)
+  const kids = folders.filter(x => x.parentId === f.id)
+  const isSelected = selId === f.id
+  return (
+    <div>
+      <button
+        onClick={() => { onSelect(f.id, lv === 0); if (kids.length > 0) setEx(!ex) }}
+        onContextMenu={e => onContextMenu(e, f.id, lv === 0)}
+        className={`w-full text-left px-3 py-1.5 text-[0.82rem] rounded-md transition-colors flex items-center gap-2 ${
+          isSelected ? 'bg-[#2563EB]/10 text-[#2563EB] font-medium' : 'text-neutral-600 hover:bg-neutral-50'
+        }`}
+        style={{ paddingLeft: `${12 + lv * 16}px` }}
+      >
+        {kids.length > 0 ? (
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`shrink-0 transition-transform ${ex ? 'rotate-90' : ''}`}>
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        ) : (
+          <span className="w-[10px] shrink-0" />
+        )}
+        <span className="inline-flex items-center gap-1.5 min-w-0">
+          <Folder size={14} strokeWidth={1.5} className="shrink-0" />
+          <span className="truncate">{f.name}</span>
+        </span>
+      </button>
+      {ex && kids.map(c => (
+        <SidebarNode key={c.id} f={c} folders={folders} lv={lv + 1} selId={selId}
+          onSelect={onSelect} onContextMenu={onContextMenu} />
+      ))}
+    </div>
+  )
 }
 
 // ── Permission Modal ──

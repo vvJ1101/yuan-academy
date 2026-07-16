@@ -47,6 +47,13 @@ ssh "$SERVER" "
     exit 1
   fi
 
+  # 检查 LibreOffice（PPT 转 PDF 必需）
+  if ! command -v soffice >/dev/null 2>&1; then
+    echo '⚠️  警告: 服务器未安装 LibreOffice，PPT 上传后无法转 PDF（前端会提示"转换失败"）'
+    echo '   安装命令: apt-get install -y libreoffice-impress libreoffice-common fonts-noto-cjk'
+    echo '   本次部署继续（其他功能不受影响）...'
+  fi
+
   # 备份当前 .next
   echo '  → 备份旧版本...'
   rm -rf .next.backup

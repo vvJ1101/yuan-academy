@@ -21,14 +21,15 @@ export const PERM_LEVEL: Record<string, number> = { view: 1, edit: 2, delete: 3,
 export function guessType(
   title: string,
   category: string
-): 'excel' | 'word' | 'pdf' | 'other' {
+): 'excel' | 'word' | 'pdf' | 'ppt' | 'other' {
   const t = title.toLowerCase()
   if (t.endsWith('.xlsx') || t.endsWith('.xls')) return 'excel'
   if (t.endsWith('.docx') || t.endsWith('.doc')) return 'word'
+  if (t.endsWith('.pptx') || t.endsWith('.ppt')) return 'ppt'
   if (t.endsWith('.pdf')) return 'pdf'
   if (category === 'sop') return 'word'
   if (category === 'policy') return 'excel'
-  if (category === 'training') return 'word'
+  if (category === 'training') return 'ppt'
   if (category === 'reference' || category === 'brand') return 'pdf'
   return 'other'
 }
@@ -38,6 +39,7 @@ export function fileTypeLabel(
   category: string
 ): string {
   const t = guessType(title, category)
+  if (t === 'ppt') return 'PPT'
   if (t === 'excel') return 'Excel'
   if (t === 'word') return 'Word'
   if (t === 'pdf') return 'PDF'
