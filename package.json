@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test:session": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/session.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.1",

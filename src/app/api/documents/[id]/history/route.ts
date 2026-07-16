@@ -4,7 +4,7 @@ import { canReadDocument } from '@/lib/permissions/documents'
 
 /** GET /api/documents/[id]/history — list edit history for a document */
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Verify user can read this document

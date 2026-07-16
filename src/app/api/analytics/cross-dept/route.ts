@@ -5,7 +5,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

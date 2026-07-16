@@ -4,7 +4,7 @@
  
  export async function POST(req: NextRequest) {
    // 1. 身份校验
-   const session = getSessionFromCookies(req.headers.get('cookie'))
+   const session = await getSessionFromCookies(req.headers.get('cookie'))
    if (!session) {
      return NextResponse.json({ error: '请先登录' }, { status: 401 })
    }

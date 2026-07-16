@@ -1,103 +1,31 @@
 import { PrismaClient } from '@prisma/client'
 import { compare, hash } from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
-import { SignJWT, jwtVerify } from 'jose'
+import {
+  readVerifiedSession,
+  signSessionToken,
+  verifySessionToken,
+  type SessionClaims,
+} from '@/lib/session'
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-dev-secret-change-in-production'
-)
-const JWT_EXPIRY = '7d'
-const COOKIE_NAME = 'session'
-
-export interface SessionUser {
-  id: string; name?: string; role: string; companyId: string | null; companyName?: string
-  departmentId: string; departmentName?: string
-}
+export interface SessionUser extends SessionClaims {}
 
 /** Sign a JWT token for session cookie */
 export async function signToken(user: SessionUser): Promise<string> {
-  return new SignJWT({
-    id: user.id,
-    name: user.name || '',
-    role: user.role,
-    companyId: user.companyId || '',
-    companyName: user.companyName || '',
-    departmentId: user.departmentId || '',
-    departmentName: user.departmentName || '',
-  })
-    .setProtectedHeader({ alg: 'HS256' })
-    .setIssuedAt()
-    .setExpirationTime(JWT_EXPIRY)
-    .sign(JWT_SECRET)
+  return signSessionToken(user)
 }
 
 /** Verify JWT token and return session user, or null */
 export async function verifyToken(token: string): Promise<SessionUser | null> {
-  try {
-    const { payload } = await jwtVerify(token, JWT_SECRET)
-    return {
-      id: payload.id as string,
-      name: payload.name as string,
-      role: payload.role as string,
-      companyId: (payload.companyId as string) || null,
-      companyName: payload.companyName as string,
-      departmentId: payload.departmentId as string,
-      departmentName: payload.departmentName as string,
-    }
-  } catch {
-    return null
-  }
+  return verifySessionToken(token)
 }
 
-/** Read session from cookie header string (sync — JWT payload decode, no signature check) */
-export function getSessionFromCookies(cookieHeader: string | null): SessionUser | null {
-  if (!cookieHeader) return null
-  try {
-    const match = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;]+)`))
-    if (!match) return null
-    const raw = decodeURIComponent(match[1])
-    // JWT token — decode payload without verification (UTF-8 safe)
-    if (raw.startsWith('eyJ')) {
-      const parts = raw.split('.')
-      if (parts.length === 3) {
-        const json = Buffer.from(parts[1], 'base64url').toString('utf-8')
-        const payload = JSON.parse(json)
-        return {
-          id: payload.id || '',
-          name: payload.name || '',
-          role: payload.role || 'staff',
-          companyId: payload.companyId || null,
-          companyName: payload.companyName || '',
-          departmentId: payload.departmentId || '',
-          departmentName: payload.departmentName || '',
-        }
-      }
-      return null
-    }
-    // Legacy plain JSON cookie
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
+/** Read and verify the signed session cookie. Unsigned legacy cookies are rejected. */
+export async function getSessionFromCookies(cookieHeader: string | null): Promise<SessionUser | null> {
+  return readVerifiedSession(cookieHeader)
 }
 
-/** Async session reader — preferred for new code */
-export async function getSessionFromCookiesAsync(cookieHeader: string | null): Promise<SessionUser | null> {
-  if (!cookieHeader) return null
-  try {
-    const match = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;]+)`))
-    if (!match) return null
-    const raw = decodeURIComponent(match[1])
-    // JWT token
-    if (raw.startsWith('eyJ')) {
-      return verifyToken(raw)
-    }
-    // Legacy plain JSON fallback
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
-}
+export const getSessionFromCookiesAsync = getSessionFromCookies
 
 export async function verifyLogin(email: string, password: string) {
   const user = await prisma.user.findUnique({

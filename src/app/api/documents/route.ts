@@ -6,7 +6,7 @@ import { statSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
@@ -91,7 +91,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   const formData = await req.formData()
   const file = formData.get('file') as File | null
   const title = formData.get('title') as string

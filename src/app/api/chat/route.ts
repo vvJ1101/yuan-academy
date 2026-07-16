@@ -64,7 +64,7 @@ function extractExcerpt(content: string, question: string, maxLen = 200): string
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id) return new Response('Unauthorized', { status: 401 })
 
   if (!checkRateLimit(session.id)) {

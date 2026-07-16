@@ -29,7 +29,7 @@ Examples:
 Query: `
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { query } = await req.json().catch(() => ({}))

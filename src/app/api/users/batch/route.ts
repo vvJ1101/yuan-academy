@@ -5,7 +5,7 @@
  function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
  
  export async function POST(req: NextRequest) {
-   const session = getSessionFromCookies(req.headers.get('cookie'))
+   const session = await getSessionFromCookies(req.headers.get('cookie'))
    if (!session?.id || session.role !== 'super_admin') return forbid()
  
    const { action, ids } = await req.json()

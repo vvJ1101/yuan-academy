@@ -14,7 +14,7 @@ function formatScope(items: string[], fallback: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: '请先登录' }, { status: 401 })
 
   try {

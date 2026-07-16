@@ -6,7 +6,7 @@ import { buildDocumentWhere } from '@/lib/permissions/documents'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const where = buildDocumentWhere(session)

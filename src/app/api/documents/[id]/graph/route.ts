@@ -4,7 +4,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 import { canReadDocument } from '@/lib/permissions/documents'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const doc = await prisma.document.findUnique({

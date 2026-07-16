@@ -6,7 +6,7 @@ import { hash } from 'bcryptjs'
 function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || !canManageUsers(session)) return forbid()
 
   const users = await prisma.user.findMany({
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { email, name, password, role, companyId, departmentId, companyIds } = await req.json()
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { id, name, role, companyId, departmentId, password, companyIds } = await req.json()
@@ -85,7 +85,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { searchParams } = new URL(req.url)

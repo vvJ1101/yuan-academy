@@ -8,7 +8,7 @@ import { sanitizeMarkdown } from '@/lib/sanitize'
 import { logEdit } from '@/lib/audit'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const doc = await prisma.document.findUnique({
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 // PUT — Edit document metadata
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
@@ -122,7 +122,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
 // DELETE — Delete document
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

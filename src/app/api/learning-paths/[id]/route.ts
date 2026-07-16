@@ -4,7 +4,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 import { logEdit } from '@/lib/audit'
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
 
@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
 
