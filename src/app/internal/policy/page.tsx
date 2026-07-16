@@ -13,6 +13,22 @@ const FL: Record<string,string> = { brand:'品牌',category:'类目',country:'�
 const SHORT: (keyof Policy)[] = ['brand','category','country','style','priceRange','series']
 const LONG: (keyof Policy)[] = ['policy','delivery']
 
+function normalizePolicy(value: Record<string, unknown>): Policy {
+  const ss26 = typeof value.ss26 === 'string' ? value.ss26 : ''
+  const aw26 = typeof value.aw26 === 'string' ? value.aw26 : ''
+  const legacyPolicy = ss26 && aw26 ? `${ss26}\n\n${aw26}` : ss26 || aw26
+  return {
+    category: typeof value.category === 'string' ? value.category : '',
+    country: typeof value.country === 'string' ? value.country : '',
+    brand: typeof value.brand === 'string' ? value.brand : '',
+    style: typeof value.style === 'string' ? value.style : '',
+    priceRange: typeof value.priceRange === 'string' ? value.priceRange : '',
+    series: typeof value.series === 'string' ? value.series : '',
+    policy: typeof value.policy === 'string' ? value.policy : legacyPolicy,
+    delivery: typeof value.delivery === 'string' ? value.delivery : '',
+  }
+}
+
 export default function PolicyPage() {
   const [items, setItems] = useState<Policy[]>([])
   const [loading, setLoading] = useState(true)
@@ -37,7 +53,20 @@ export default function PolicyPage() {
     fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.role==='super_admin')setCanEdit(true) }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0 && d.data.permissions.includes('menu.policyUpload'))setCanEdit(true) }).catch((err: any) => console.warn("[SilentError]", err))
   }, [])
-  useEffect(() => { fetch('/showroom/data/policies.json?t='+Date.now()).then(r=>r.json()).then(d=>{ if(Array.isArray(d))setItems(d.map((x)=>({category:x.category||'',country:x.country||'',brand:x.brand||'',style:x.style||'',priceRange:x.priceRange||'',series:x.series||'',policy:x.policy||(x.ss26?x.aw26?x.ss26+'\n\n'+x.aw26:x.ss26:x.aw26||''),delivery:x.delivery||''}))) }).finally(()=>setLoading(false)); fetch('/showroom/data/policies.updated.json?t='+Date.now()).then(r=>r.json()).then(d=>{ if(d.updatedAt)setUpdatedAt(new Date(d.updatedAt).toLocaleString('zh-CN')); if(d.updatedBy)setUpdatedBy(d.updatedBy) }).catch((err: any) => console.warn("[SilentError]", err)) }, [])
+  useEffect(() => {
+    fetch('/api/policies', { cache: 'no-store' })
+      .then(async response => {
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || '订货政策加载失败')
+        setItems(Array.isArray(data.policies) ? data.policies.map(normalizePolicy) : [])
+        if (data.updatedAt) setUpdatedAt(new Date(data.updatedAt).toLocaleString('zh-CN'))
+        if (data.updatedBy) setUpdatedBy(data.updatedBy)
+      })
+      .catch(error => {
+        setSaveMsg(error instanceof Error ? error.message : '订货政策加载失败')
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   function copyText(text: string): Promise<void> { if(navigator.clipboard)return navigator.clipboard.writeText(text); return new Promise((r,rej)=>{ const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed';ta.style.left='-9999px'; document.body.appendChild(ta);ta.select(); try{document.execCommand('copy');r()}catch(e){rej(e)} document.body.removeChild(ta) }) }
   function fmtPolicy(p: Policy): string { const l:string[]=[]; l.push('【'+p.brand+'】'+p.category+' · '+p.country); if(p.style)l.push(FL.style+'：'+p.style); if(p.priceRange)l.push(FL.priceRange+'：'+p.priceRange); if(p.series)l.push(FL.series+'：'+p.series); if(p.policy)l.push('\n'+FL.policy+'：\n'+p.policy); if(p.delivery)l.push('\n'+FL.delivery+'：\n'+p.delivery); return l.join('\n') }
@@ -58,10 +87,11 @@ export default function PolicyPage() {
     try {
       const upd = items.map((p,i)=>i===editingIdx?{category:editDraft.category,country:editDraft.country,brand:editDraft.brand,style:editDraft.style,priceRange:editDraft.priceRange,series:editDraft.series,policy:editDraft.policy,delivery:editDraft.delivery}:p)
       const res=await fetch('/api/admin/policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({policies:upd})})
+      const data=await res.json().catch(()=>({}))
       if(res.ok){ setItems(upd); setEditingIdx(null); setEditDraft(null); setSavedIdx(editingIdx); setSaveMsg('保存成功'); setTimeout(()=>{setSavedIdx(null);setSaveMsg('')},2000)
         const el=document.querySelector('[data-idx="'+editingIdx+'"]'); if(el)el.scrollIntoView({behavior:'smooth',block:'center'})
-        fetch('/showroom/data/policies.updated.json?t='+Date.now()).then(r=>r.json()).then(d=>{if(d.updatedAt)setUpdatedAt(new Date(d.updatedAt).toLocaleString('zh-CN')); if(d.updatedBy)setUpdatedBy(d.updatedBy)}).catch((err: any) => console.warn("[SilentError]", err))
-      } else { const e=await res.json().catch(()=>({})); setSaveMsg(e.error||'保存失败') }
+        if(data.updatedAt)setUpdatedAt(new Date(data.updatedAt).toLocaleString('zh-CN')); if(data.updatedBy)setUpdatedBy(data.updatedBy)
+      } else { setSaveMsg(data.error||'保存失败') }
     } catch { setSaveMsg('网络错误') }
     setSaving(false)
   }

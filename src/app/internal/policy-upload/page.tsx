@@ -34,6 +34,6 @@ export default function AdminPolicyPage() {
         <button type="submit" disabled={!file||status==='uploading'} className="px-6 py-2.5 bg-[#2563EB] text-white text-[0.82rem] font-medium rounded-md hover:bg-blue-600 disabled:opacity-50">{status==='uploading'?'解析中...':'上传并更新'}</button>
       </form>
     </div>
-    <div className="mt-4"><a href="/showroom/data/订货政策-上传模板.xlsx" className="text-[0.75rem] text-neutral-500 hover:text-neutral-900 underline">下载 Excel 模版</a></div>
+    <div className="mt-4"><a href="/api/policies/template" className="text-[0.75rem] text-neutral-500 hover:text-neutral-900 underline">下载 Excel 模版</a></div>
   </div>)
 }
