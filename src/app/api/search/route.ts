@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
     const results = db.prepare(sql).all(...params) as any[]
 
     // Permission filter: only return documents the user can access
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(session)
     const accessibleIds = Object.keys(where).length === 0
       ? results.map((r: any) => r.id) // super_admin: all results
       : (await prisma.document.findMany({

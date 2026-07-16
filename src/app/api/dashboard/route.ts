@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Unified permission: ownerDept OR audience includes user's department
-  const docWhere = buildDocumentWhere(session)
+  const docWhere = await buildDocumentWhere(session)
 
   const [
     docCount, deptCount, companyCount,

@@ -126,15 +126,11 @@ export function canUploadToFolder(user: SessionUser, folderPerm?: Permission | n
  * Build Prisma `where` clause for documents the user can READ.
  * Uses legacy ownerDept + audiences (folder permission check done at app layer since it requires walking folder tree).
  */
-export function getVisibleDocuments(user: SessionUser): Record<string, unknown> {
+export function buildDocumentVisibilityWhere(
+  user: SessionUser,
+  allowedFolderIds: string[],
+): Record<string, unknown> {
   if (user.role === 'super_admin') return {}
-
-  // Collect folder IDs the user has explicit access to
-  const { getUserAccessibleFolderIds } = require('./folders')
-  let allowedFolderIds: string[] = []
-  try {
-    allowedFolderIds = getUserAccessibleFolderIds(user)
-  } catch { /* fallback: empty list means no folder access */ }
 
   const conditions: Record<string, unknown>[] = []
 
@@ -155,10 +151,19 @@ export function getVisibleDocuments(user: SessionUser): Record<string, unknown> 
     return { id: '__no_access__' }
   }
 
+  if (conditions.length === 1) return conditions[0]
   return { OR: conditions }
 }
 
-export const buildDocumentWhere = getVisibleDocuments
+export async function buildDocumentWhere(user: SessionUser): Promise<Record<string, unknown>> {
+  if (user.role === 'super_admin') return {}
+
+  const { getUserAccessibleFolderIds } = await import('./folders')
+  const allowedFolderIds = await getUserAccessibleFolderIds(user)
+  return buildDocumentVisibilityWhere(user, allowedFolderIds)
+}
+
+export const getVisibleDocuments = buildDocumentWhere
 
 // ── Admin Route Access ──
 

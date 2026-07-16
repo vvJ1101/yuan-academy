@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   if (slug) conditions.push({ slug })
 
   // Unified permission: ownerDept OR audience includes user's department
-  conditions.push(buildDocumentWhere(session))
+  conditions.push(await buildDocumentWhere(session))
 
   const where: Record<string, unknown> = {}
   if (conditions.length > 0) where.AND = conditions

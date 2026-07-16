@@ -102,7 +102,7 @@ async function ftsSearch(q: string, session: any) {
     db.close()
 
     // Fallback to LIKE if FTS returns nothing
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(session)
     if (docIds.length > 0) {
       const docs = await prisma.document.findMany({
         where: { ...where, id: { in: docIds } },
