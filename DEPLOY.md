@@ -5,9 +5,9 @@
 | 项目 | 值 |
 |------|-----|
 | **生产域名** | https://academy.yuanshowroom.cn |
-| **服务器 IP** | `120.79.162.27` |
-| **SSH 用户** | `root` |
-| **SSH 密码** | `Huang991208` |
+| **服务器地址** | 从安全的密码管理器或运维平台获取 |
+| **SSH 用户** | 从安全的密码管理器或运维平台获取 |
+| **SSH 凭据** | 禁止写入本文档或提交到 Git |
 | **项目路径** | `/var/www/yuan-academy` |
 | **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
 
@@ -16,8 +16,8 @@
 环境变量在服务器 `.env.local` 中，**不要提交到 Git**：
 
 ```
-DEEPSEEK_API_KEY=<从本地.env.local获取>
-JWT_SECRET=353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6
+DEEPSEEK_API_KEY=<从密码管理器或部署平台注入>
+JWT_SECRET=<使用密码生成器创建的高强度随机值>
 NODE_ENV=production
 ```
 
@@ -25,7 +25,7 @@ NODE_ENV=production
 
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
-- SSH 免密登录已配置：`ssh root@120.79.162.27`
+- SSH 登录信息已通过安全渠道配置
 - 本地 Node.js >= 18
 
 ### 一键部署脚本
@@ -242,21 +242,10 @@ bash scripts/deploy-local.sh
 
 | 密钥名称 | 值（以下面的为准） |
 |----------|----------------|
-| `SERVER_HOST` | `120.79.162.27` |
-| `SERVER_USER` | `root` |
-| `SSH_PRIVATE_KEY` | 下面的私钥（从 `-----BEGIN OPENSSH PRIVATE KEY-----` 到 `-----END OPENSSH PRIVATE KEY-----` 整段复制） |
-| `DEEPSEEK_API_KEY` | 从本地 `.env.local` 复制 |
-| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
+| `SERVER_HOST` | 从运维平台获取，不写入仓库 |
+| `SERVER_USER` | 使用最小权限部署账号，不在仓库公开具体值 |
+| `SSH_PRIVATE_KEY` | 新建专用部署密钥，并只保存到 GitHub Actions Secrets |
+| `DEEPSEEK_API_KEY` | 从密码管理器复制到 GitHub Actions Secrets |
+| `JWT_SECRET` | 使用密码生成器创建并保存到 GitHub Actions Secrets |
 
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-```
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FAAAAJh7Wqg8e1qo
-PAAAAAtzc2gtZWQyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FA
-AAAEC9hpKFwpsSSQoq+fyhO+uEb2wfhPjBgTyjMGdFnK/xylq630GAsF9cJ+wwi16j4m4n
-Qkt+x5iR2C1v309YCrYUAAAAFWdpdGh1Yi1hY3Rpb25zLWRlcGxveQ==
------END OPENSSH PRIVATE KEY-----
-```
+> 安全要求：私钥、密码和实际环境变量值不得出现在 Markdown、Issue、PR、日志或 Git 历史中。发现泄露后必须立即撤销旧凭据并重新生成；仅删除当前文件内容不能消除历史泄露。
