@@ -1,31 +1,12 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { jwtVerify } from 'jose'
+import { verifySessionToken, type SessionClaims } from '@/lib/session'
 
 // basePath 'https://academy.yuanshowroom.cn' is stripped before middleware sees the path
 const PUBLIC = ['/login', '/api/auth/login', '/api/auth/logout']
 const ADMIN_API = ['/api/documents']
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fallback-dev-secret-change-in-production'
-)
-
-/**
- * Verify JWT signature and return payload, or null if invalid.
- * Uses Web Crypto API (available in Edge Runtime).
- */
-async function verifyJwt(token: string): Promise<any | null> {
-  try {
-    const parts = token.split('.')
-    if (parts.length !== 3) return null
-    const { payload } = await jwtVerify(token, JWT_SECRET)
-    return payload
-  } catch {
-    return null
-  }
-}
-
-function checkAdminRoute(session: any, pathname: string): boolean {
+function checkAdminRoute(session: SessionClaims, pathname: string): boolean {
   if (session.role === 'super_admin') return true
   if (pathname.startsWith('/internal/admin/users') || pathname.startsWith('/api/users')) {
     return false
@@ -56,39 +37,26 @@ if (!pathname.startsWith('/internal') && !pathname.startsWith('/api') && pathnam
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  // Verify JWT signature (not just decode)
-  let session: any = { role: 'staff' }
+  // Only signed JWT sessions are accepted. Legacy JSON cookies are rejected.
   const raw = decodeURIComponent(sessionCookie.value)
-  if (raw.startsWith('eyJ')) {
-    const payload = await verifyJwt(raw)
-    if (!payload) {
-      // Invalid or expired token → clear cookie + redirect
-      const response = NextResponse.redirect(new URL('/login', request.url))
-      response.cookies.set('session', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 })
-      return response
+  const session = await verifySessionToken(raw)
+  if (!session) {
+    if (pathname.startsWith('/api')) {
+      return NextResponse.json({ error: '请先登录' }, { status: 401 })
     }
-    session = {
-      id: payload.id || '',
-      name: payload.name || '',
-      role: payload.role || 'staff',
-      companyId: payload.companyId || null,
-      companyName: payload.companyName || '',
-      departmentId: payload.departmentId || '',
-      departmentName: payload.departmentName || '',
-    }
-  } else {
-    // Legacy plain JSON cookie — still accepted for backward compat
-    try { session = JSON.parse(raw) } catch {}
+    const response = NextResponse.redirect(new URL('/login', request.url))
+    response.cookies.set('session', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 })
+    return response
   }
 
   if (!checkAdminRoute(session, pathname)) {
-    if (pathname.startsWith('/api')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (pathname.startsWith('/api')) return NextResponse.json({ error: '无权执行此操作' }, { status: 403 })
     return NextResponse.redirect(new URL('/internal/dashboard', request.url))
   }
 
   if (ADMIN_API.some(p => pathname.startsWith(p)) && session.role !== 'super_admin' && session.role !== 'dept_admin') {
     if (request.method !== 'GET') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json({ error: '无权执行此操作' }, { status: 403 })
     }
   }
 

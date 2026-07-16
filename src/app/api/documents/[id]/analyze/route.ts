@@ -166,7 +166,7 @@ function sanitizeDraft(draft: string): string {
 // ── POST handler: Two-phase pipeline ──
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   // Auth
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 

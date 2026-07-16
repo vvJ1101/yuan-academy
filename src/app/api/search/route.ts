@@ -19,7 +19,7 @@ interface SearchResult {
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
     const results = db.prepare(sql).all(...params) as any[]
 
     // Permission filter: only return documents the user can access
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(session)
     const accessibleIds = Object.keys(where).length === 0
       ? results.map((r: any) => r.id) // super_admin: all results
       : (await prisma.document.findMany({

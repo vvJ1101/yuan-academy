@@ -3,7 +3,7 @@ import { prisma, getSessionFromCookies } from '@/lib/auth'
 
 // POST — record a view event
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { documentId, action } = await req.json()
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
 
 // GET — recent activity (admin only)
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

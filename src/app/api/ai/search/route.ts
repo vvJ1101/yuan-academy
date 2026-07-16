@@ -29,7 +29,7 @@ Examples:
 Query: `
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { query } = await req.json().catch(() => ({}))
@@ -102,7 +102,7 @@ async function ftsSearch(q: string, session: any) {
     db.close()
 
     // Fallback to LIKE if FTS returns nothing
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(session)
     if (docIds.length > 0) {
       const docs = await prisma.document.findMany({
         where: { ...where, id: { in: docIds } },

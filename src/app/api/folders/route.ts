@@ -7,7 +7,7 @@ import { getFolderPermission } from '@/lib/permissions/folders'
 
 // GET /api/folders — list folder tree (filtered by user permissions)
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Calculate actual storage usage from disk
@@ -64,7 +64,7 @@ function calcStorageUsage() {
 
 // POST /api/folders — create folder
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/folders — update folder
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -121,7 +121,7 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/folders — delete folder
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
