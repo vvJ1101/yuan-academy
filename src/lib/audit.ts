@@ -42,3 +42,16 @@ export function logEdit(userId: string, documentId: string) {
 export function logDelete(userId: string, documentId: string) {
   return logDocumentAccess(userId, documentId, 'delete')
 }
+
+/** Log a policy update or spreadsheet upload. */
+export async function logPolicyChange(
+  userId: string,
+  action: 'policy:update' | 'policy:upload',
+) {
+  try {
+    await prisma.auditLog.create({ data: { userId, action } })
+  } catch {
+    // Audit logging must never block the main operation
+    console.error(`[AUDIT] Failed to log ${action} for user ${userId}`)
+  }
+}
