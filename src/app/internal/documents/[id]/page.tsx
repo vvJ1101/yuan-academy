@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -8,6 +8,8 @@ import { Loader2, ArrowLeft, Eye, Edit3, Save, Star, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Permission } from '@/lib/permissions/folders'
+import { buildDocumentReplacementUrl } from '@/components/internal/pdf-reader/reader-state'
+import { createExportResourceManager } from '@/components/internal/pdf-reader/export-resources'
 
 const PdfReader = dynamic(
   () => import('@/components/internal/pdf-reader/pdf-reader').then((module) => module.PdfReader),
@@ -48,12 +50,26 @@ export default function DocumentDetailPage() {
   const [remark, setRemark] = useState('')
   const [saving, setSaving] = useState(false)
   const [downloadingOriginal, setDownloadingOriginal] = useState(false)
+  const [replacingFile, setReplacingFile] = useState(false)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [bookmarked, setBookmarked] = useState(false)
   const [history, setHistory] = useState<{id:string;userId:string;action:string;createdAt:string;user?:{name:string}}[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const replacementInputRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+  const failedExportManagerRef = useRef<ReturnType<typeof createExportResourceManager> | null>(null)
+  if (!failedExportManagerRef.current) failedExportManagerRef.current = createExportResourceManager()
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      failedExportManagerRef.current?.cleanup()
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -127,26 +143,72 @@ export default function DocumentDetailPage() {
 
   const handleFailedPreviewDownload = async () => {
     if (!doc || !canEdit) return
+    const manager = failedExportManagerRef.current!
+    const signal = manager.begin()
     setDownloadingOriginal(true)
     setError('')
     try {
       const response = await fetch(`/api/documents/${encodeURIComponent(doc.id)}/file?variant=original&disposition=attachment`, {
         credentials: 'same-origin',
+        signal,
       })
       if (response.status === 403) throw new Error('你没有下载或打印权限')
       if (!response.ok) throw new Error('下载失败，请稍后重试')
       const blobUrl = URL.createObjectURL(await response.blob())
+      manager.trackBlobUrl(blobUrl)
       const link = document.createElement('a')
       link.href = blobUrl
       link.download = `${doc.title}.${doc.fileType}`
       document.body.appendChild(link)
       link.click()
       link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+      manager.deferCleanup(1000, { closePopup: false })
     } catch (downloadError) {
-      setError(downloadError instanceof Error ? downloadError.message : '下载失败，请稍后重试')
+      manager.cleanup()
+      if (mountedRef.current && !(downloadError instanceof DOMException && downloadError.name === 'AbortError')) {
+        setError(downloadError instanceof Error ? downloadError.message : '下载失败，请稍后重试')
+      }
     } finally {
-      setDownloadingOriginal(false)
+      if (mountedRef.current) setDownloadingOriginal(false)
+    }
+  }
+
+  const handleReplacementFile = async (file: File | undefined) => {
+    if (!doc || !canEdit || !file) return
+    setReplacingFile(true)
+    setRecoveryMessage('')
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(buildDocumentReplacementUrl(doc.id), {
+        method: 'POST',
+        body: formData,
+      })
+      const result = await response.json().catch(() => ({}))
+      if (response.status === 403) throw new Error('你没有编辑该文档的权限')
+      if (!response.ok) throw new Error(result.error || '替换文件失败，请稍后重试')
+      const extension = file.name.split('.').pop()?.toLowerCase() || doc.fileType
+      const status = result.processing?.status || 'processing'
+      const fallbackDocument = {
+        fileType: extension,
+        processingStatus: status,
+        processingError: result.processing?.error || null,
+      }
+      const refreshedResponse = await fetch(`/api/documents/${encodeURIComponent(doc.id)}`)
+      if (refreshedResponse.ok) {
+        const refreshedDocument = await refreshedResponse.json()
+        setDoc(refreshedDocument)
+        setEditContent(refreshedDocument.fullContent || refreshedDocument.content || '')
+      } else {
+        setDoc((current) => current ? { ...current, ...fallbackDocument } : current)
+      }
+      setRecoveryMessage(status === 'ready' ? '替换完成，在线预览已恢复。' : '文件已替换，系统正在重新生成预览。')
+    } catch (replacementError) {
+      setError(replacementError instanceof Error ? replacementError.message : '替换文件失败，请稍后重试')
+    } finally {
+      setReplacingFile(false)
+      if (replacementInputRef.current) replacementInputRef.current.value = ''
     }
   }
 
@@ -274,12 +336,21 @@ export default function DocumentDetailPage() {
               </p>
               {canEdit && (
                 <div className="mt-2 flex flex-wrap justify-center gap-2">
-                  <Link
-                    href="/internal/documents"
-                    className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                  <input
+                    ref={replacementInputRef}
+                    type="file"
+                    accept=".docx,.ppt,.pptx,.pdf,.xls,.xlsx"
+                    className="hidden"
+                    onChange={(event) => void handleReplacementFile(event.target.files?.[0])}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => replacementInputRef.current?.click()}
+                    disabled={replacingFile}
+                    className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                   >
-                    返回并重新上传
-                  </Link>
+                    {replacingFile ? '正在重新处理…' : '替换文件并重试'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleFailedPreviewDownload()}
@@ -290,6 +361,7 @@ export default function DocumentDetailPage() {
                   </button>
                 </div>
               )}
+              {recoveryMessage && <p role="status" className="text-xs text-emerald-700">{recoveryMessage}</p>}
               {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
             </div>
           )

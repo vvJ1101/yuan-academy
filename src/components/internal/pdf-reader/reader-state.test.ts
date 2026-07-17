@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildDocumentReplacementUrl,
   buildReaderFileUrl,
+  calculateFitPageScale,
+  calculateFitWidthScale,
   clampPage,
   getReaderActions,
   initialReaderState,
@@ -10,6 +13,7 @@ import {
   renderHighlightedText,
   readerReducer,
 } from './reader-state'
+import { createExportResourceManager } from './export-resources'
 
 test('clampPage keeps page numbers inside the loaded document', () => {
   assert.equal(clampPage(-1, 12), 1)
@@ -126,4 +130,118 @@ test('search highlighting escapes PDF text and the query before adding marks', (
     '&lt;script&gt;<mark>安全</mark>&lt;/script&gt; <mark>安全</mark>',
   )
   assert.equal(renderHighlightedText('预算 (Q1)', '(Q1)'), '预算 <mark>(Q1)</mark>')
+})
+
+test('failed preview recovery keeps the current document id in the replacement route', () => {
+  assert.equal(buildDocumentReplacementUrl('doc failed/1'), '/api/documents/doc%20failed%2F1/replace')
+})
+
+test('desktop sidebar toggles without changing the current page', () => {
+  const hidden = readerReducer(initialReaderState, { type: 'toggleSidebar' })
+  assert.equal(hidden.sidebarOpen, false)
+  assert.equal(hidden.page, 1)
+  assert.equal(readerReducer(hidden, { type: 'toggleSidebar' }).sidebarOpen, true)
+})
+
+test('fit modes remain explicit and manual zoom returns to custom mode', () => {
+  const pageFit = readerReducer(initialReaderState, { type: 'fitPage', scale: 0.72 })
+  assert.equal(pageFit.fitMode, 'page')
+  assert.equal(pageFit.scale, 0.72)
+
+  const widthFit = readerReducer(pageFit, { type: 'fitWidth' })
+  assert.equal(widthFit.fitMode, 'width')
+  assert.equal(widthFit.scale, 1)
+
+  const zoomed = readerReducer(widthFit, { type: 'zoomIn' })
+  assert.equal(zoomed.fitMode, 'custom')
+  assert.equal(zoomed.scale, 1.25)
+})
+
+test('fit-page scale responds to dimensions, rotation, and zoom boundaries', () => {
+  assert.equal(calculateFitPageScale({ availableWidth: 800, availableHeight: 600, pageWidth: 800, pageHeight: 1200, rotation: 0 }), 0.5)
+  assert.equal(calculateFitPageScale({ availableWidth: 800, availableHeight: 600, pageWidth: 800, pageHeight: 1200, rotation: 90 }), 2 / 3)
+  assert.equal(calculateFitPageScale({ availableWidth: 4000, availableHeight: 4000, pageWidth: 200, pageHeight: 200, rotation: 0 }), 3)
+})
+
+test('fit-width scale recomputes when the reader is resized', () => {
+  const page = { pageWidth: 600, pageHeight: 900, rotation: 0 as const }
+  assert.equal(calculateFitWidthScale({ ...page, availableWidth: 900 }), 1.5)
+  assert.equal(calculateFitWidthScale({ ...page, availableWidth: 450 }), 0.75)
+  assert.equal(calculateFitWidthScale({ ...page, availableWidth: 100 }), 0.5)
+})
+
+test('export manager aborts, revokes, removes listeners, clears timers, and closes popup', () => {
+  const revoked: string[] = []
+  const cleared: unknown[] = []
+  const listeners = new Map<string, () => void>()
+  let timerCallback: (() => void) | null = null
+  let closed = 0
+  const popup = {
+    addEventListener: (name: string, callback: () => void) => listeners.set(name, callback),
+    removeEventListener: (name: string) => listeners.delete(name),
+    close: () => { closed += 1 },
+  }
+  const manager = createExportResourceManager({
+    revokeObjectURL: (url) => revoked.push(url),
+    setTimer: (callback) => { timerCallback = callback; return 'timer' },
+    clearTimer: (timer) => cleared.push(timer),
+  })
+
+  const firstSignal = manager.begin()
+  manager.trackPopup(popup)
+  manager.trackBlobUrl('blob:first')
+  manager.watchPopup(() => undefined, () => undefined, 5000, () => undefined)
+  assert.equal(listeners.size, 2)
+  assert.ok(timerCallback)
+
+  manager.cleanup()
+  assert.equal(firstSignal.aborted, true)
+  assert.deepEqual(revoked, ['blob:first'])
+  assert.deepEqual(cleared, ['timer'])
+  assert.equal(listeners.size, 0)
+  assert.equal(closed, 1)
+})
+
+test('starting a new export cleans the previous active export first', () => {
+  const revoked: string[] = []
+  const manager = createExportResourceManager({ revokeObjectURL: (url) => revoked.push(url) })
+  const firstSignal = manager.begin()
+  manager.trackBlobUrl('blob:old')
+  const secondSignal = manager.begin()
+
+  assert.equal(firstSignal.aborted, true)
+  assert.equal(secondSignal.aborted, false)
+  assert.deepEqual(revoked, ['blob:old'])
+})
+
+test('print fallback timeout releases the popup and Blob even when load never fires', () => {
+  let timerCallback: (() => void) | null = null
+  let closed = false
+  const revoked: string[] = []
+  const listeners = new Map<string, () => void>()
+  const popup = {
+    addEventListener: (name: string, callback: () => void) => listeners.set(name, callback),
+    removeEventListener: (name: string) => listeners.delete(name),
+    close: () => { closed = true },
+  }
+  const manager = createExportResourceManager({
+    revokeObjectURL: (url) => revoked.push(url),
+    setTimer: (callback) => { timerCallback = callback; return 1 },
+    clearTimer: () => undefined,
+  })
+  manager.begin()
+  manager.trackPopup(popup)
+  manager.trackBlobUrl('blob:print')
+  manager.watchPopup(
+    () => undefined,
+    () => manager.cleanup(),
+    15_000,
+    () => manager.cleanup(),
+  )
+
+  assert.ok(timerCallback)
+  ;(timerCallback as () => void)()
+  assert.equal(closed, true)
+  assert.deepEqual(revoked, ['blob:print'])
+  assert.equal(listeners.size, 0)
 })

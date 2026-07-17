@@ -5,12 +5,16 @@ import {
   ChevronRight,
   Download,
   Expand,
+  Maximize2,
   List,
   Minus,
   Plus,
   Printer,
   RotateCw,
   Search,
+  PanelLeftClose,
+  PanelLeftOpen,
+  MoveHorizontal,
 } from 'lucide-react'
 
 import { PdfSearch } from './pdf-search'
@@ -26,12 +30,17 @@ interface PdfToolbarProps {
   canDownload: boolean
   canPrint: boolean
   busyAction: 'download' | 'print' | null
+  sidebarOpen: boolean
+  fitMode: 'width' | 'page' | 'custom'
   onPageChange: (page: number) => void
   onPreviousPage: () => void
   onNextPage: () => void
   onZoomOut: () => void
   onZoomIn: () => void
   onRotate: () => void
+  onToggleSidebar: () => void
+  onFitWidth: () => void
+  onFitPage: () => void
   onToggleSearch: () => void
   onSearchChange: (query: string) => void
   onPreviousSearchResult: () => void
@@ -70,6 +79,15 @@ export function PdfToolbar(props: PdfToolbarProps) {
         </button>
 
         <span className="mx-1 h-6 w-px shrink-0 bg-neutral-200" />
+        <button type="button" onClick={props.onToggleSidebar} className={`${toolButton} hidden md:flex`} aria-label={props.sidebarOpen ? '收起页面缩略图' : '展开页面缩略图'}>
+          {props.sidebarOpen ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
+        </button>
+        <button type="button" onClick={props.onFitWidth} className={`${toolButton} hidden sm:flex ${props.fitMode === 'width' ? 'bg-blue-50 text-blue-700' : ''}`} aria-label="适应宽度">
+          <MoveHorizontal className="size-4" />
+        </button>
+        <button type="button" onClick={props.onFitPage} className={`${toolButton} hidden sm:flex ${props.fitMode === 'page' ? 'bg-blue-50 text-blue-700' : ''}`} aria-label="适应页面">
+          <Maximize2 className="size-4" />
+        </button>
         <button type="button" onClick={props.onZoomOut} disabled={props.scale <= 0.5} className="hidden size-11 shrink-0 items-center justify-center rounded-lg text-neutral-600 hover:bg-neutral-100 disabled:opacity-30 sm:flex" aria-label="缩小">
           <Minus className="size-4" />
         </button>

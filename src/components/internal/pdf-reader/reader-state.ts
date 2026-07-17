@@ -4,6 +4,7 @@ export const SCALE_STEP = 0.25
 
 export type ReaderPermission = 'view' | 'edit' | 'delete' | 'admin'
 export type ReaderFilePurpose = 'preview' | 'download' | 'print'
+export type ReaderFitMode = 'width' | 'page' | 'custom'
 
 export function getReaderActions(permission: ReaderPermission): {
   download: boolean
@@ -18,6 +19,35 @@ export function buildReaderFileUrl(documentId: string, purpose: ReaderFilePurpos
   if (purpose === 'download') return `${base}?variant=original&disposition=attachment`
   if (purpose === 'print') return `${base}?variant=preview&disposition=inline&purpose=print`
   return `${base}?variant=preview&disposition=inline`
+}
+
+export function buildDocumentReplacementUrl(documentId: string): string {
+  return `/api/documents/${encodeURIComponent(documentId)}/replace`
+}
+
+export function calculateFitPageScale(input: {
+  availableWidth: number
+  availableHeight: number
+  pageWidth: number
+  pageHeight: number
+  rotation: ReaderState['rotation']
+}): number {
+  const rotated = input.rotation === 90 || input.rotation === 270
+  const width = rotated ? input.pageHeight : input.pageWidth
+  const height = rotated ? input.pageWidth : input.pageHeight
+  if (width <= 0 || height <= 0 || input.availableWidth <= 0 || input.availableHeight <= 0) return 1
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(input.availableWidth / width, input.availableHeight / height)))
+}
+
+export function calculateFitWidthScale(input: {
+  availableWidth: number
+  pageWidth: number
+  pageHeight: number
+  rotation: ReaderState['rotation']
+}): number {
+  const rotatedWidth = input.rotation === 90 || input.rotation === 270 ? input.pageHeight : input.pageWidth
+  if (rotatedWidth <= 0 || input.availableWidth <= 0) return 1
+  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, input.availableWidth / rotatedWidth))
 }
 
 function escapeHtml(value: string): string {
@@ -55,6 +85,8 @@ export type ReaderState = {
   rotation: 0 | 90 | 180 | 270
   searchResultCount: number
   searchResultIndex: number
+  fitMode: ReaderFitMode
+  sidebarOpen: boolean
 }
 
 export type ReaderAction =
@@ -64,6 +96,9 @@ export type ReaderAction =
   | { type: 'previousPage' }
   | { type: 'zoomIn' }
   | { type: 'zoomOut' }
+  | { type: 'fitWidth'; scale?: number }
+  | { type: 'fitPage'; scale: number }
+  | { type: 'toggleSidebar' }
   | { type: 'rotateClockwise' }
   | { type: 'setSearchResultCount'; count: number }
   | { type: 'nextSearchResult' }
@@ -76,6 +111,8 @@ export const initialReaderState: ReaderState = {
   rotation: 0,
   searchResultCount: 0,
   searchResultIndex: -1,
+  fitMode: 'width',
+  sidebarOpen: true,
 }
 
 export function clampPage(page: number, numPages: number): number {
@@ -106,9 +143,15 @@ export function readerReducer(state: ReaderState, action: ReaderAction): ReaderS
     case 'previousPage':
       return { ...state, page: clampPage(state.page - 1, state.numPages) }
     case 'zoomIn':
-      return { ...state, scale: nextScale(state.scale, 'in') }
+      return { ...state, scale: nextScale(state.scale, 'in'), fitMode: 'custom' }
     case 'zoomOut':
-      return { ...state, scale: nextScale(state.scale, 'out') }
+      return { ...state, scale: nextScale(state.scale, 'out'), fitMode: 'custom' }
+    case 'fitWidth':
+      return { ...state, scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, action.scale ?? 1)), fitMode: 'width' }
+    case 'fitPage':
+      return { ...state, scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, action.scale)), fitMode: 'page' }
+    case 'toggleSidebar':
+      return { ...state, sidebarOpen: !state.sidebarOpen }
     case 'rotateClockwise':
       return { ...state, rotation: ((state.rotation + 90) % 360) as ReaderState['rotation'] }
     case 'setSearchResultCount': {

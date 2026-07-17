@@ -9,10 +9,13 @@ import 'react-pdf/dist/Page/TextLayer.css'
 import type { Permission } from '@/lib/permissions/folders'
 
 import { Document, Page } from './pdf-worker'
+import { createExportResourceManager } from './export-resources'
 import { PdfThumbnails } from './pdf-thumbnails'
 import { PdfToolbar } from './pdf-toolbar'
 import {
   buildReaderFileUrl,
+  calculateFitPageScale,
+  calculateFitWidthScale,
   getReaderActions,
   initialReaderState,
   readerReducer,
@@ -38,7 +41,8 @@ function loadingPanel(progress: number | null) {
 export function PdfReader({ documentId, title, permission, fileType }: PdfReaderProps) {
   const [state, dispatch] = useReducer(readerReducer, initialReaderState)
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
-  const [fitWidth, setFitWidth] = useState(720)
+  const [containerSize, setContainerSize] = useState({ width: 720, height: 640 })
+  const [pageSize, setPageSize] = useState({ width: 0, height: 0 })
   const [loadProgress, setLoadProgress] = useState<number | null>(null)
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
@@ -49,6 +53,9 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
   const [retryKey, setRetryKey] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const mountedRef = useRef(true)
+  const exportManagerRef = useRef<ReturnType<typeof createExportResourceManager> | null>(null)
+  if (!exportManagerRef.current) exportManagerRef.current = createExportResourceManager()
 
   const actions = getReaderActions(permission)
   const previewUrl = buildReaderFileUrl(documentId, 'preview')
@@ -61,12 +68,45 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
   useEffect(() => {
     const node = viewportRef.current
     if (!node) return
-    const updateWidth = () => setFitWidth(Math.max(280, node.clientWidth - 32))
-    updateWidth()
-    const observer = new ResizeObserver(updateWidth)
+    const updateSize = () => {
+      const next = {
+        width: Math.max(280, node.clientWidth - 32),
+        height: Math.max(280, node.clientHeight - 32),
+      }
+      setContainerSize((current) => current.width === next.width && current.height === next.height ? current : next)
+    }
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [pdf])
+  }, [pdf, state.sidebarOpen])
+
+  useEffect(() => {
+    if (!pageSize.width || !pageSize.height || state.fitMode === 'custom') return
+    const scale = state.fitMode === 'page'
+      ? calculateFitPageScale({
+          availableWidth: containerSize.width,
+          availableHeight: containerSize.height,
+          pageWidth: pageSize.width,
+          pageHeight: pageSize.height,
+          rotation: state.rotation,
+        })
+      : calculateFitWidthScale({
+          availableWidth: containerSize.width,
+          pageWidth: pageSize.width,
+          pageHeight: pageSize.height,
+          rotation: state.rotation,
+        })
+    dispatch({ type: state.fitMode === 'page' ? 'fitPage' : 'fitWidth', scale })
+  }, [containerSize, pageSize, state.fitMode, state.rotation])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      exportManagerRef.current?.cleanup()
+    }
+  }, [])
 
   useEffect(() => {
     if (!pdf || state.numPages === 0) return
@@ -101,17 +141,24 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
   }, [])
 
   const handleExport = useCallback(async (purpose: 'download' | 'print') => {
+    const manager = exportManagerRef.current!
+    const signal = manager.begin()
     const printWindow = purpose === 'print' ? window.open('', '_blank') : null
-    if (printWindow) printWindow.opener = null
+    if (printWindow) {
+      printWindow.opener = null
+      manager.trackPopup(printWindow)
+    }
     setBusyAction(purpose)
     setActionError('')
     try {
       const response = await fetch(buildReaderFileUrl(documentId, purpose), {
         credentials: 'same-origin',
+        signal,
       })
       if (response.status === 403) throw new Error('你没有下载或打印权限')
       if (!response.ok) throw new Error(purpose === 'print' ? '打印文件读取失败，请稍后重试' : '下载失败，请稍后重试')
       const blobUrl = URL.createObjectURL(await response.blob())
+      manager.trackBlobUrl(blobUrl)
       if (purpose === 'download') {
         const link = document.createElement('a')
         link.href = blobUrl
@@ -119,23 +166,36 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
         document.body.appendChild(link)
         link.click()
         link.remove()
-        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000)
+        manager.deferCleanup(1000, { closePopup: false })
       } else if (printWindow) {
+        manager.watchPopup(
+          () => {
+            printWindow.focus()
+            printWindow.print()
+            manager.deferCleanup(60_000, { closePopup: false })
+          },
+          () => {
+            if (mountedRef.current) setActionError('打印窗口加载失败，请稍后重试')
+            manager.cleanup()
+          },
+          15_000,
+          () => {
+            if (mountedRef.current) setActionError('打印窗口加载超时，请稍后重试')
+            manager.cleanup()
+          },
+        )
         printWindow.location.href = blobUrl
-        printWindow.addEventListener('load', () => {
-          printWindow.focus()
-          printWindow.print()
-          window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000)
-        }, { once: true })
       } else {
-        URL.revokeObjectURL(blobUrl)
+        manager.cleanup()
         throw new Error('浏览器阻止了打印窗口，请允许弹出窗口后重试')
       }
     } catch (error) {
-      printWindow?.close()
-      setActionError(error instanceof Error ? error.message : '操作失败，请稍后重试')
+      manager.cleanup()
+      if (mountedRef.current && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setActionError(error instanceof Error ? error.message : '操作失败，请稍后重试')
+      }
     } finally {
-      setBusyAction(null)
+      if (mountedRef.current) setBusyAction(null)
     }
   }, [documentId, fileType, title])
 
@@ -162,6 +222,7 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
       <button
         type="button"
         onClick={() => {
+          exportManagerRef.current?.cleanup()
           setPdf(null)
           setLoadError('')
           setLoadProgress(null)
@@ -199,12 +260,34 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
               canDownload={actions.download}
               canPrint={actions.print}
               busyAction={busyAction}
+              sidebarOpen={state.sidebarOpen}
+              fitMode={state.fitMode}
               onPageChange={(page) => dispatch({ type: 'setPage', page })}
               onPreviousPage={() => dispatch({ type: 'previousPage' })}
               onNextPage={() => dispatch({ type: 'nextPage' })}
               onZoomOut={() => dispatch({ type: 'zoomOut' })}
               onZoomIn={() => dispatch({ type: 'zoomIn' })}
               onRotate={() => dispatch({ type: 'rotateClockwise' })}
+              onToggleSidebar={() => dispatch({ type: 'toggleSidebar' })}
+              onFitWidth={() => dispatch({
+                type: 'fitWidth',
+                scale: calculateFitWidthScale({
+                  availableWidth: containerSize.width,
+                  pageWidth: pageSize.width,
+                  pageHeight: pageSize.height,
+                  rotation: state.rotation,
+                }),
+              })}
+              onFitPage={() => dispatch({
+                type: 'fitPage',
+                scale: calculateFitPageScale({
+                  availableWidth: containerSize.width,
+                  availableHeight: containerSize.height,
+                  pageWidth: pageSize.width,
+                  pageHeight: pageSize.height,
+                  rotation: state.rotation,
+                }),
+              })}
               onToggleSearch={() => setSearchOpen((open) => !open)}
               onSearchChange={setQuery}
               onPreviousSearchResult={() => dispatch({ type: 'previousSearchResult' })}
@@ -222,16 +305,22 @@ export function PdfReader({ documentId, title, permission, fileType }: PdfReader
             )}
 
             <div className="flex min-h-[70vh]">
-              <aside className="hidden w-36 shrink-0 overflow-y-auto border-r border-neutral-200 bg-white p-2 md:block" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
-                <PdfThumbnails numPages={state.numPages} currentPage={state.page} onSelect={(page) => dispatch({ type: 'setPage', page })} />
-              </aside>
-              <div ref={viewportRef} className="flex min-w-0 flex-1 justify-center overflow-auto p-4" style={{ maxHeight: 'calc(100vh - 10rem)' }}>
+              {state.sidebarOpen && (
+                <aside className="hidden h-[70vh] w-36 shrink-0 overflow-y-auto border-r border-neutral-200 bg-white p-2 md:block">
+                  <PdfThumbnails numPages={state.numPages} currentPage={state.page} onSelect={(page) => dispatch({ type: 'setPage', page })} />
+                </aside>
+              )}
+              <div ref={viewportRef} className="flex h-[70vh] min-w-0 flex-1 justify-center overflow-auto p-4">
                 <Page
                   key={`${state.page}-${state.rotation}`}
                   pageNumber={state.page}
-                  width={fitWidth}
                   scale={state.scale}
                   rotate={state.rotation}
+                  onLoadSuccess={({ originalWidth, originalHeight }) => setPageSize((current) => (
+                    current.width === originalWidth && current.height === originalHeight
+                      ? current
+                      : { width: originalWidth, height: originalHeight }
+                  ))}
                   customTextRenderer={query ? customTextRenderer : undefined}
                   onGetTextSuccess={({ items }) => {
                     const normalizedQuery = query.trim().toLocaleLowerCase()
