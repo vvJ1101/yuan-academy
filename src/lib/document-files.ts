@@ -64,7 +64,7 @@ export function validateUploadFile(file: UploadFileInput): ValidatedUpload {
 }
 
 function getDocumentDirectory(docId: string): string {
-  if (!docId || basename(docId) !== docId) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(docId)) {
     throw new Error('文档 ID 无效')
   }
 

@@ -77,6 +77,15 @@ test('constructs original and preview paths inside the private document director
   )
 })
 
+test('rejects document IDs that could escape or alter the private storage path', () => {
+  const unsafeDocumentIds = ['.', '..', '../outside', '/tmp/outside', 'folder\\outside', 'doc id']
+
+  for (const docId of unsafeDocumentIds) {
+    assert.throws(() => getOriginalFilePath(docId, 'pdf'), /文档 ID 无效/)
+    assert.throws(() => getPreviewFilePath(docId), /文档 ID 无效/)
+  }
+})
+
 test('allows downloads only for edit, delete, and admin permission levels', () => {
   assert.equal(canDownloadPermission(null), false)
   assert.equal(canDownloadPermission('view'), false)
