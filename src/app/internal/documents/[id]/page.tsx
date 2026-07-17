@@ -25,6 +25,19 @@ const PdfReader = dynamic(
   },
 )
 
+const ExcelReader = dynamic(
+  () => import('@/components/internal/excel-reader').then((module) => module.ExcelReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border border-neutral-200 bg-neutral-50">
+        <Loader2 className="size-6 animate-spin text-blue-500" />
+        <span className="ml-2 text-sm text-neutral-500">正在打开 Excel 阅读器…</span>
+      </div>
+    ),
+  },
+)
+
 interface Doc {
   id: string; title: string; slug: string; content: string; fullContent: string; condensedContent: string
   displayMode: string; category: string; ownerDeptId: string
@@ -246,6 +259,8 @@ export default function DocumentDetailPage() {
 
   const displayContent = tab === 'preview' ? (doc.fullContent || doc.content) : editContent
   const usesPdfReader = ['pdf', 'ppt', 'pptx'].includes(doc.fileType)
+  const usesExcelReader = ['xls', 'xlsx'].includes(doc.fileType)
+  const usesFileReader = usesPdfReader || usesExcelReader
   const readerPermission: Permission = ['view', 'edit', 'delete', 'admin'].includes(doc.userPermission || '')
     ? doc.userPermission as Permission
     : 'view'
@@ -272,7 +287,7 @@ export default function DocumentDetailPage() {
           </button>
 
           {/* Edit / Preview toggle */}
-          {canEdit && !usesPdfReader && (
+          {canEdit && !usesFileReader && (
             <div className="flex items-center bg-neutral-100 rounded-lg p-0.5">
               <button onClick={() => setTab('preview')}
                 className={`min-h-[44px] px-4 text-[0.78rem] rounded-md transition-all font-medium flex items-center gap-1.5 ${
@@ -324,20 +339,32 @@ export default function DocumentDetailPage() {
       {/* ── Content area ── */}
       {tab === 'preview' ? (
         /* ── Preview mode ── */
-        usesPdfReader ? (
+        usesFileReader ? (
           doc.processingStatus === 'ready' ? (
-            <PdfReader
-              documentId={doc.id}
-              title={doc.title}
-              permission={readerPermission}
-              fileType={doc.fileType}
-            />
+            usesPdfReader ? (
+              <PdfReader
+                documentId={doc.id}
+                title={doc.title}
+                permission={readerPermission}
+                fileType={doc.fileType}
+              />
+            ) : (
+              <ExcelReader
+                documentId={doc.id}
+                title={doc.title}
+                permission={readerPermission}
+              />
+            )
           ) : doc.processingStatus === 'processing' || doc.processingStatus === 'pending' ? (
             <div className="flex min-h-[45vh] flex-col items-center justify-center gap-4 rounded-xl border border-neutral-200 bg-neutral-50 px-4 text-center">
               <Loader2 className="size-7 animate-spin text-blue-500" aria-hidden="true" />
               <div>
-                <p className="text-sm font-medium text-neutral-700">正在生成在线预览</p>
-                <p className="mt-1 text-xs text-neutral-400">PPT 转换可能需要几分钟，完成后刷新页面即可阅读。</p>
+                <p className="text-sm font-medium text-neutral-700">正在准备在线预览</p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  {usesPdfReader && doc.fileType !== 'pdf'
+                    ? 'PPT 转换可能需要几分钟，完成后刷新页面即可阅读。'
+                    : '文件处理完成后刷新页面即可阅读。'}
+                </p>
               </div>
               <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-neutral-200">
                 <div className="h-full w-1/2 animate-pulse rounded-full bg-blue-500" />
