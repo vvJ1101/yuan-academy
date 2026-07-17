@@ -214,7 +214,7 @@ Sum each document's actual stored original file. Keep the 100 GB display ceiling
 
 Create `scripts/migrate-document-files-private.ts` with `--dry-run` as the default and `--apply` as the only write mode. It must discover legacy `public/uploads/documents/<id>/original.*` and `output.pdf`, validate the Document ID, copy to `data/private/documents/<id>/`, update metadata only after checksums match, and leave the public copy untouched until the full migration verifies. A second explicit `--remove-public-after-verify` mode may remove verified public copies; it must refuse removal when any checksum or database update failed.
 
-Run: `npx tsx scripts/migrate-document-files-private.ts --dry-run`
+Run: `npx ts-node --compiler-options '{"module":"CommonJS","moduleResolution":"Node"}' scripts/migrate-document-files-private.ts --dry-run`
 
 Expected: a count and byte summary with no filesystem or database changes.
 
