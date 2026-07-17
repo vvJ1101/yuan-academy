@@ -14,7 +14,7 @@ import {
   readerReducer,
 } from './reader-state'
 import { createExportResourceManager } from './export-resources'
-import { mapReplacementOutcome } from './replacement-feedback'
+import { mapReplacementOutcome, sanitizeReplacementError } from './replacement-feedback'
 
 test('clampPage keeps page numbers inside the loaded document', () => {
   assert.equal(clampPage(-1, 12), 1)
@@ -282,4 +282,53 @@ test('non-OK and network replacement failures keep the selected file', () => {
     mapReplacementOutcome({ kind: 'network', error: new Error('连接中断') }),
     { status: 'request-error', accepted: false, clearFile: false, message: '网络连接失败，请保留文件后重试。' },
   )
+})
+
+test('replacement errors redact POSIX paths and stack traces from every payload shape', () => {
+  const failed = mapReplacementOutcome({
+    kind: 'response',
+    ok: true,
+    payload: {
+      processing: {
+        status: 'failed',
+        error: "转换失败：/Users/vv/private/client-secret.pptx\n    at convert (/var/www/app/converter.js:42:9)",
+      },
+    },
+  })
+  assert.equal(failed.message, '转换失败：【路径已隐藏】')
+  assert.doesNotMatch(failed.message, /Users|client-secret|\/var\/www|converter\.js/)
+
+  const compatible = mapReplacementOutcome({
+    kind: 'response',
+    ok: true,
+    payload: { processing: { status: 'failed' }, processingError: '读取失败：/var/data/private/original.ppt' },
+  })
+  assert.equal(compatible.message, '读取失败：【路径已隐藏】')
+})
+
+test('replacement errors redact Windows and file URL paths', () => {
+  assert.equal(
+    sanitizeReplacementError('打开失败：C:\\Users\\vv\\secret\\deck.pptx', '安全错误'),
+    '打开失败：【路径已隐藏】',
+  )
+  const nonOk = mapReplacementOutcome({
+    kind: 'response',
+    ok: false,
+    payload: { error: '无法读取 file:///private/var/tmp/customer/deck.pptx' },
+  })
+  assert.equal(nonOk.message, '无法读取 【路径已隐藏】')
+  assert.doesNotMatch(nonOk.message, /private|customer|deck\.pptx/)
+})
+
+test('replacement error sanitizer bounds length and falls back for purely technical errors', () => {
+  const longMessage = `文件格式不受支持：${'说明'.repeat(200)}`
+  const bounded = sanitizeReplacementError(longMessage, '安全错误')
+  assert.ok(Array.from(bounded).length <= 160)
+  assert.match(bounded, /…$/)
+
+  assert.equal(
+    sanitizeReplacementError('Error: spawn soffice ENOENT\n    at ChildProcess._handle.onexit (node:internal/child_process:1:1)', '文件处理失败，请重试。'),
+    '文件处理失败，请重试。',
+  )
+  assert.equal(sanitizeReplacementError('文件 MIME 类型不匹配', '安全错误'), '文件 MIME 类型不匹配')
 })
