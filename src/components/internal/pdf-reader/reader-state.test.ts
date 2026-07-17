@@ -14,6 +14,7 @@ import {
   readerReducer,
 } from './reader-state'
 import { createExportResourceManager } from './export-resources'
+import { mapReplacementOutcome } from './replacement-feedback'
 
 test('clampPage keeps page numbers inside the loaded document', () => {
   assert.equal(clampPage(-1, 12), 1)
@@ -244,4 +245,41 @@ test('print fallback timeout releases the popup and Blob even when load never fi
   assert.equal(closed, true)
   assert.deepEqual(revoked, ['blob:print'])
   assert.equal(listeners.size, 0)
+})
+
+test('replacement ready and processing responses are accepted and clear the selected file', () => {
+  assert.deepEqual(
+    mapReplacementOutcome({ kind: 'response', ok: true, payload: { processing: { status: 'ready' } } }),
+    { status: 'ready', accepted: true, clearFile: true, message: '替换完成，在线预览已恢复。' },
+  )
+  assert.deepEqual(
+    mapReplacementOutcome({ kind: 'response', ok: true, payload: { processing: { status: 'processing' } } }),
+    { status: 'processing', accepted: true, clearFile: true, message: '文件已接收，系统正在生成预览。' },
+  )
+})
+
+test('a 200 failed replacement remains an error and keeps the selected file for retry', () => {
+  assert.deepEqual(
+    mapReplacementOutcome({
+      kind: 'response',
+      ok: true,
+      payload: { processing: { status: 'failed', error: 'PPT 文件损坏' } },
+    }),
+    { status: 'failed', accepted: false, clearFile: false, message: 'PPT 文件损坏' },
+  )
+  assert.equal(
+    mapReplacementOutcome({ kind: 'response', ok: true, payload: { processing: { status: 'failed' } } }).message,
+    '文件处理失败，请检查文件后直接重试。',
+  )
+})
+
+test('non-OK and network replacement failures keep the selected file', () => {
+  assert.deepEqual(
+    mapReplacementOutcome({ kind: 'response', ok: false, payload: { error: '文件 MIME 类型不匹配' } }),
+    { status: 'request-error', accepted: false, clearFile: false, message: '文件 MIME 类型不匹配' },
+  )
+  assert.deepEqual(
+    mapReplacementOutcome({ kind: 'network', error: new Error('连接中断') }),
+    { status: 'request-error', accepted: false, clearFile: false, message: '网络连接失败，请保留文件后重试。' },
+  )
 })

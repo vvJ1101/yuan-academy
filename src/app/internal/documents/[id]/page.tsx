@@ -10,6 +10,7 @@ import remarkGfm from 'remark-gfm'
 import type { Permission } from '@/lib/permissions/folders'
 import { buildDocumentReplacementUrl } from '@/components/internal/pdf-reader/reader-state'
 import { createExportResourceManager } from '@/components/internal/pdf-reader/export-resources'
+import { mapReplacementOutcome } from '@/components/internal/pdf-reader/replacement-feedback'
 
 const PdfReader = dynamic(
   () => import('@/components/internal/pdf-reader/pdf-reader').then((module) => module.PdfReader),
@@ -51,6 +52,7 @@ export default function DocumentDetailPage() {
   const [saving, setSaving] = useState(false)
   const [downloadingOriginal, setDownloadingOriginal] = useState(false)
   const [replacingFile, setReplacingFile] = useState(false)
+  const [replacementFile, setReplacementFile] = useState<File | null>(null)
   const [recoveryMessage, setRecoveryMessage] = useState('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
@@ -186,29 +188,42 @@ export default function DocumentDetailPage() {
         body: formData,
       })
       const result = await response.json().catch(() => ({}))
-      if (response.status === 403) throw new Error('你没有编辑该文档的权限')
-      if (!response.ok) throw new Error(result.error || '替换文件失败，请稍后重试')
+      const outcome = mapReplacementOutcome({ kind: 'response', ok: response.ok, payload: result })
+      if (!outcome.accepted) {
+        setDoc((current) => outcome.status === 'failed' && current ? {
+          ...current,
+          processingStatus: 'failed',
+          processingError: outcome.message,
+        } : current)
+        setError(outcome.message)
+        return
+      }
       const extension = file.name.split('.').pop()?.toLowerCase() || doc.fileType
-      const status = result.processing?.status || 'processing'
+      const status = outcome.status
       const fallbackDocument = {
         fileType: extension,
         processingStatus: status,
-        processingError: result.processing?.error || null,
+        processingError: null,
       }
-      const refreshedResponse = await fetch(`/api/documents/${encodeURIComponent(doc.id)}`)
-      if (refreshedResponse.ok) {
+      try {
+        const refreshedResponse = await fetch(`/api/documents/${encodeURIComponent(doc.id)}`)
+        if (!refreshedResponse.ok) throw new Error('refresh failed')
         const refreshedDocument = await refreshedResponse.json()
         setDoc(refreshedDocument)
         setEditContent(refreshedDocument.fullContent || refreshedDocument.content || '')
-      } else {
+      } catch {
         setDoc((current) => current ? { ...current, ...fallbackDocument } : current)
       }
-      setRecoveryMessage(status === 'ready' ? '替换完成，在线预览已恢复。' : '文件已替换，系统正在重新生成预览。')
+      setRecoveryMessage(outcome.message)
+      if (outcome.clearFile) {
+        setReplacementFile(null)
+        if (replacementInputRef.current) replacementInputRef.current.value = ''
+      }
     } catch (replacementError) {
-      setError(replacementError instanceof Error ? replacementError.message : '替换文件失败，请稍后重试')
+      const outcome = mapReplacementOutcome({ kind: 'network', error: replacementError })
+      setError(outcome.message)
     } finally {
       setReplacingFile(false)
-      if (replacementInputRef.current) replacementInputRef.current.value = ''
     }
   }
 
@@ -341,16 +356,32 @@ export default function DocumentDetailPage() {
                     type="file"
                     accept=".docx,.ppt,.pptx,.pdf,.xls,.xlsx"
                     className="hidden"
-                    onChange={(event) => void handleReplacementFile(event.target.files?.[0])}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      setReplacementFile(file)
+                      void handleReplacementFile(file)
+                    }}
                   />
                   <button
                     type="button"
-                    onClick={() => replacementInputRef.current?.click()}
+                    onClick={() => replacementFile
+                      ? void handleReplacementFile(replacementFile)
+                      : replacementInputRef.current?.click()}
                     disabled={replacingFile}
                     className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                   >
-                    {replacingFile ? '正在重新处理…' : '替换文件并重试'}
+                    {replacingFile ? '正在重新处理…' : replacementFile ? `重试：${replacementFile.name}` : '替换文件并重试'}
                   </button>
+                  {replacementFile && !replacingFile && (
+                    <button
+                      type="button"
+                      onClick={() => replacementInputRef.current?.click()}
+                      className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 px-4 text-sm text-amber-800 hover:bg-amber-100"
+                    >
+                      重新选择文件
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleFailedPreviewDownload()}
