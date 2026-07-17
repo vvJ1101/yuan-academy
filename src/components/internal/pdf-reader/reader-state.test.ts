@@ -284,7 +284,7 @@ test('non-OK and network replacement failures keep the selected file', () => {
   )
 })
 
-test('replacement errors redact POSIX paths and stack traces from every payload shape', () => {
+test('replacement errors reject whole POSIX path and stack messages from every payload shape', () => {
   const failed = mapReplacementOutcome({
     kind: 'response',
     ok: true,
@@ -295,7 +295,7 @@ test('replacement errors redact POSIX paths and stack traces from every payload 
       },
     },
   })
-  assert.equal(failed.message, '转换失败：【路径已隐藏】')
+  assert.equal(failed.message, '文件处理失败，请检查文件后直接重试。')
   assert.doesNotMatch(failed.message, /Users|client-secret|\/var\/www|converter\.js/)
 
   const compatible = mapReplacementOutcome({
@@ -303,20 +303,20 @@ test('replacement errors redact POSIX paths and stack traces from every payload 
     ok: true,
     payload: { processing: { status: 'failed' }, processingError: '读取失败：/var/data/private/original.ppt' },
   })
-  assert.equal(compatible.message, '读取失败：【路径已隐藏】')
+  assert.equal(compatible.message, '文件处理失败，请检查文件后直接重试。')
 })
 
-test('replacement errors redact Windows and file URL paths', () => {
+test('replacement errors reject whole Windows and file URL path messages', () => {
   assert.equal(
     sanitizeReplacementError('打开失败：C:\\Users\\vv\\secret\\deck.pptx', '安全错误'),
-    '打开失败：【路径已隐藏】',
+    '安全错误',
   )
   const nonOk = mapReplacementOutcome({
     kind: 'response',
     ok: false,
     payload: { error: '无法读取 file:///private/var/tmp/customer/deck.pptx' },
   })
-  assert.equal(nonOk.message, '无法读取 【路径已隐藏】')
+  assert.equal(nonOk.message, '替换文件失败，请保留文件后重试。')
   assert.doesNotMatch(nonOk.message, /private|customer|deck\.pptx/)
 })
 
@@ -331,4 +331,45 @@ test('replacement error sanitizer bounds length and falls back for purely techni
     '文件处理失败，请重试。',
   )
   assert.equal(sanitizeReplacementError('文件 MIME 类型不匹配', '安全错误'), '文件 MIME 类型不匹配')
+})
+
+test('dangerous replacement paths fall back as a whole across all payload shapes', () => {
+  const probes = [
+    mapReplacementOutcome({
+      kind: 'response',
+      ok: true,
+      payload: { processing: { status: 'failed', error: '转换失败：/Library/Application Support/YUAN/secret.pdf' } },
+    }).message,
+    mapReplacementOutcome({
+      kind: 'response',
+      ok: true,
+      payload: { processing: { status: 'failed' }, processingError: '读取 /company/private/secret.pdf 失败' },
+    }).message,
+    mapReplacementOutcome({
+      kind: 'response',
+      ok: false,
+      payload: { error: '无法打开 /Library/YUAN/secret.pdf' },
+    }).message,
+    mapReplacementOutcome({
+      kind: 'response',
+      ok: false,
+      payload: { error: '无法打开 \\\\server\\private share\\secret deck.pptx' },
+    }).message,
+  ]
+
+  for (const safeMessage of probes) {
+    assert.doesNotMatch(safeMessage, /Library|company|share|secret|deck/i)
+    assert.match(safeMessage, /重试/)
+  }
+})
+
+test('slash-separated business copy is not mistaken for an absolute path', () => {
+  assert.equal(
+    sanitizeReplacementError('当前仅支持 PDF/PPT 文件', '安全错误'),
+    '当前仅支持 PDF/PPT 文件',
+  )
+  assert.equal(
+    sanitizeReplacementError('文件格式不匹配，请重新选择', '安全错误'),
+    '文件格式不匹配，请重新选择',
+  )
 })

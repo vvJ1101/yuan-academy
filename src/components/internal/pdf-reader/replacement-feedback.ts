@@ -21,38 +21,31 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 const MAX_ERROR_LENGTH = 160
-const HIDDEN_PATH = '【路径已隐藏】'
 
 export function sanitizeReplacementError(value: unknown, fallback: string): string {
   if (typeof value !== 'string' || !value.trim()) return fallback
+  const raw = value.trim()
+  const hasControlOrMultiline = /[\u0000-\u001f\u007f]/.test(raw)
+  const hasFileUrl = /\bfile:(?:\/{2,3})?/i.test(raw)
+  const hasWindowsDrivePath = /(^|[^A-Za-z0-9])[A-Za-z]:[\\/]/.test(raw)
+  const hasUncPath = /\\{2}[^\\\r\n]+\\[^\r\n]+/.test(raw)
+  const hasPosixAbsolutePath = /(^|[^A-Za-z0-9._~/-])\/(?!\/)[^\s/\\:'"<>]+(?:[ \t][^\s/\\:'"<>]+)*(?:\/[^\r\n]*)?/.test(raw)
+  const hasStackOrTechnicalDetail = /(?:^|\s)(?:Error|TypeError|RangeError|ReferenceError|SyntaxError):|\b(?:ENOENT|EACCES|EPERM|ECONNREFUSED|node:internal|spawn|soffice|libreoffice)\b|\bat\s+[A-Za-z0-9_$.[\]<>]+\s*\(/i.test(raw)
 
-  const withoutStack = value
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .filter((line) => !/^\s*(?:at\s|Caused by:|node:internal)/i.test(line))
-    .join(' ')
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+  if (
+    hasControlOrMultiline
+    || hasFileUrl
+    || hasWindowsDrivePath
+    || hasUncPath
+    || hasPosixAbsolutePath
+    || hasStackOrTechnicalDetail
+  ) return fallback
 
-  const redacted = withoutStack
-    .replace(/(['"])(?:file:\/{2,3}|[A-Za-z]:[\\/]|\/(?:Users|var|home|tmp|private|opt|usr|etc|srv|data|Volumes|app|root|mnt|work|workspace)\/)[^'"\r\n]+\1/gi, (_match, quote: string) => `${quote}${HIDDEN_PATH}${quote}`)
-    .replace(/\bfile:\/{2,3}[^\s'"<>，。；！？]+/gi, HIDDEN_PATH)
-    .replace(/\b[A-Za-z]:[\\/][^\s'"<>，。；！？]+/g, HIDDEN_PATH)
-    .replace(/\\\\[^\\\s]+\\[^\s'"<>，。；！？]+/g, HIDDEN_PATH)
-    .replace(/\/(?:Users|var|home|tmp|private|opt|usr|etc|srv|data|Volumes|app|root|mnt|work|workspace)(?:\/[^\s'"<>，。；！？]*)?/gi, HIDDEN_PATH)
-    .replace(/^\s*(?:Error|TypeError|RangeError|ReferenceError|SyntaxError):\s*/i, '')
-    .replace(/\s+at\s+[A-Za-z0-9_$.[\]<>]+.*$/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  const cleaned = raw.replace(/\s+/g, ' ').trim()
+  if (!cleaned || !/[\u3400-\u9fff]/.test(cleaned)) return fallback
 
-  const meaningful = redacted
-    .replaceAll(HIDDEN_PATH, '')
-    .replace(/\b(?:ENOENT|EACCES|EPERM|spawn|soffice|libreoffice|node:internal)\b/gi, '')
-    .replace(/[^A-Za-z0-9\u3400-\u9fff]+/g, '')
-  const hasChineseBusinessText = /[\u3400-\u9fff]/.test(meaningful)
-  if (!redacted || !meaningful || !hasChineseBusinessText) return fallback
-
-  const characters = Array.from(redacted)
-  if (characters.length <= MAX_ERROR_LENGTH) return redacted
+  const characters = Array.from(cleaned)
+  if (characters.length <= MAX_ERROR_LENGTH) return cleaned
   return `${characters.slice(0, MAX_ERROR_LENGTH - 1).join('')}…`
 }
 
