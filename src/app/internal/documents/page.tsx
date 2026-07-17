@@ -20,7 +20,7 @@ interface Doc {
   ownerDeptId?: string | null; ownerDept?: { name: string; slug: string } | null
   audiences?: {department?:{name:string;slug:string}}[]; folderId: string | null; folder?: { id: string; name: string } | null
   updatedAt: string; author: { name: string }; userPermission?: string | null
-  fileSize?: number | null; summary?: string
+  fileSize?: number | null; fileType?: string | null; summary?: string
 }
 interface Folder { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; inheritPermissions: boolean; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
@@ -36,7 +36,23 @@ const PERM_LEVEL: Record<string, number> = { view: 1, edit: 2, delete: 3, admin:
 
 function fmtSize(d: Doc): string { if (d.fileSize) { const b = d.fileSize; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` } const c = d.fullContent || d.condensedContent || ''; const b = new Blob([c]).size; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` }
 function permOk(p: string|null, r: string): boolean { if(!p) return false; return (PERM_LEVEL[p]||0) >= (PERM_LEVEL[r]||0) }
-function fileIcon(d: Doc) { const t = guessType(d.title, d.category); if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />; if (t === 'ppt') return <img src="/images/ppt.png" alt="" onError={e => { (e.target as HTMLImageElement).style.display='none'; (e.target as HTMLImageElement).parentElement!.innerHTML='<div class=\"w-6 h-6 rounded flex items-center justify-center text-[0.5rem] font-bold text-orange-600 bg-orange-50 shrink-0\">PPT</div>' }} className="w-6 h-6 object-contain shrink-0" />; return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> }
+function fileIcon(d: Doc) { 
+  let t = 'other'
+  if (d.fileType) {
+    const ft = d.fileType.toLowerCase()
+    if (ft === 'xlsx' || ft === 'xls') t = 'excel'
+    else if (ft === 'docx' || ft === 'doc') t = 'word'
+    else if (ft === 'pptx' || ft === 'ppt') t = 'ppt'
+    else if (ft === 'pdf') t = 'pdf'
+  }
+  if (t === 'other') t = guessType(d.title, d.category)
+  
+  if (t === 'excel') return <img src="/images/excel.png" alt="" className="w-6 h-6 object-contain shrink-0" />
+  if (t === 'word') return <img src="/images/word.png" alt="" className="w-6 h-6 object-contain shrink-0" />
+  if (t === 'pdf') return <img src="/images/pdf.png" alt="" className="w-6 h-6 object-contain shrink-0" />
+  if (t === 'ppt') return <img src="/images/ppt.png" alt="" onError={e => { (e.target as HTMLImageElement).style.display='none'; (e.target as HTMLImageElement).parentElement!.innerHTML='<div class=\"w-6 h-6 rounded flex items-center justify-center text-[0.5rem] font-bold text-orange-600 bg-orange-50 shrink-0\">PPT</div>' }} className="w-6 h-6 object-contain shrink-0" />
+  return <FileText size={15} strokeWidth={1.5} className="text-neutral-400 shrink-0" /> 
+}
 
 // ═══════════════════════════════════════════
 function DocumentsContent() {
@@ -48,7 +64,7 @@ function DocumentsContent() {
   const [spaceFilter, setSpaceFilter] = useState(sp.get('space')||''); const [folderFilter, setFolderFilter] = useState(''); const [companyFilter, setCompanyFilter] = useState(sp.get("company")||"")
   const [showUpload, setShowUpload] = useState(false); const [upTitle, setUpTitle] = useState('')
   const [upFile, setUpFile] = useState<File | null>(null); const [upFolderId, setUpFolderId] = useState('')
-  const [upCat, setUpCat] = useState('sop'); const [upAiParse, setUpAiParse] = useState(true)
+  const [upCat, setUpCat] = useState('sop'); const [upAiParse, setUpAiParse] = useState(false)
   const [upStatus, setUpStatus] = useState<'idle'|'uploading'|'done'|'error'>('idle')
   const [selectedDoc, setSelectedDoc] = useState<Doc|null>(null)
   const [upMsg, setUpMsg] = useState(''); const [upDoc, setUpDoc] = useState<Doc | null>(null)
@@ -77,27 +93,19 @@ function DocumentsContent() {
   function toggleSelect(id: string) {
     setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
-  function selectAll() {
-    const manageable = filtered.filter(d => permOk(docPerm(d), 'edit'))
-    if (selectedIds.size === manageable.length && manageable.length > 0) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(manageable.map(d => d.id)))
-    }
-  }
   async function batchDelete() {
     if (selectedIds.size === 0) return
     if (!confirm(`确定删除选中的 ${selectedIds.size} 个文档？此操作不可恢复。`)) return
     setBatchDeleting(true)
     const ids = Array.from(selectedIds)
     await fetch('/api/documents/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', ids }) })
-    setSelectedIds(new Set()); setBatchDeleting(false); refresh()
+    setSelectedIds(new Set()); setBatchDeleting(false); refresh(); window.dispatchEvent(new Event('folderRefresh'))
   }
   async function batchMove(fid: string | null) {
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
     await fetch('/api/documents/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move', ids, folderId: fid }) })
-    setSelectedIds(new Set()); setBatchMoveOpen(false); refresh()
+    setSelectedIds(new Set()); setBatchMoveOpen(false); refresh(); window.dispatchEvent(new Event('folderRefresh'))
   }
 
   // ── Data ──
@@ -135,12 +143,22 @@ function DocumentsContent() {
   useEffect(()=>{const cid=sp.get("company")||"";if(cid&&cid!==companyFilter)setCompanyFilter(cid)},[sp.get("company")])
   const spaceFolderIds = new Set<string>()
   function collectIds(pid: string) { folders.filter(f=>f.parentId===pid).forEach(f=>{spaceFolderIds.add(f.id);collectIds(f.id)}) }
-  if(companyFilter&&companyFilter!=="_notfound_"){folders.filter(f=>f.companyId===companyFilter).forEach(f=>spaceFolderIds.add(f.id))}
+  // Collect folder IDs based on filters
+  if (spaceFilter) {
+    spaceFolderIds.add(spaceFilter)
+    collectIds(spaceFilter)
+  }
+  if (companyFilter && companyFilter !== "_notfound_") {
+    folders.filter(f => f.companyId === companyFilter).forEach(f => {
+      spaceFolderIds.add(f.id)
+      collectIds(f.id)
+    })
+  }
 
   let filtered = docs.filter(d=>{
     if(search&&!d.title.toLowerCase().includes(search.toLowerCase())) return false
-    if(spaceFilter&&!(d.folderId&&spaceFolderIds.has(d.folderId))) return false
-    if(folderFilter&&d.folderId!==folderFilter) return false
+    if(spaceFilter && !(d.folderId && spaceFolderIds.has(d.folderId))) return false
+    if(folderFilter && d.folderId !== folderFilter) return false
     return true
   })
 
@@ -152,6 +170,18 @@ function DocumentsContent() {
     if (sortBy === 'category') return (a.category || '').localeCompare(b.category || '', 'zh') || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     return 0
   })
+
+  const manageableDocs = filtered.filter(d => permOk(docPerm(d), 'edit'))
+  const isAllSelected = selectedIds.size > 0 && selectedIds.size === manageableDocs.length
+  const isSomeSelected = selectedIds.size > 0 && !isAllSelected
+
+  function selectAll() {
+    if (isAllSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(manageableDocs.map(d => d.id)))
+    }
+  }
 
   // Resolve actual space and folder chain from spaceFilter (may point to a subfolder)
   let currentSpace = folders.find(f=>f.id===spaceFilter) || folders.find(f=>f.slug===spaceFilter) || null
@@ -198,48 +228,22 @@ function DocumentsContent() {
 
   const toggleExpand = (id: string) => { setExpanded(prev=>{ const n=new Set(prev); if(n.has(id))n.delete(id);else n.add(id);return n }) }
   const selectSpace = (id: string) => { setSpaceFilter(id); setFolderFilter(''); setSearch('') }
-  const resetUpload = ()=>{setUpTitle('');setUpFile(null);setUpFolderId('');setUpCat('sop');setUpAiParse(true);setUpStatus('idle');setUpMsg('');setUpDoc(null)}
+  const resetUpload = ()=>{setUpTitle('');setUpFile(null);setUpFolderId('');setUpCat('sop');setUpAiParse(false);setUpStatus('idle');setUpMsg('');setUpDoc(null)}
   const openUpload = (fid: string) => { resetUpload(); setUpFolderId(fid); setShowUpload(true) }
 
-  async function handleUpload(e:React.FormEvent){e.preventDefault();if(upStatus!=='idle'||!upFile||!upTitle||!upFolderId)return;setUpStatus('uploading');const fd=new FormData();fd.append('file',upFile);fd.append('title',upTitle);fd.append('category',upCat);fd.append('authorId',me?.id||'');fd.append('folderId',upFolderId);try{const res=await fetch('/api/documents',{method:'POST',body:fd});if(res.ok){const u=await res.json();setUpDoc(u);setUpStatus('done');setUpMsg('上传成功');refresh();if(upAiParse)setShowAi(true)}else{const e=await res.json().catch(()=>({}));setUpStatus('error');setUpMsg(e.error||'上传失败')}}catch{setUpStatus('error');setUpMsg('网络错误')}}
-  async function createFolder(name:string,parentId:string){if(!name.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),parentId,inheritPermissions:true})});loadData();setExpanded(prev=>{const n=new Set(prev);n.add(parentId);return n})}
-  async function createSpace(){if(!nsName.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nsName.trim(),parentId:null,companyId:nsCompanyId||null,inheritPermissions:true})});setNewSpaceOpen(false);setNsName('');setNsCompanyId('');loadData()}
-  async function renameFolder(f:Folder){const n=prompt('新名称:',f.name);if(n&&n!==f.name){await fetch('/api/folders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:f.id,name:n})});loadData()}}
-  async function deleteFolder(f:Folder){if(!confirm(`删除「${f.name}」？子文件夹和文件将移至上级目录。`))return;const wasSpace=spaceFilter===f.id;await fetch(`/api/folders?id=${f.id}`,{method:'DELETE'});loadData();refresh();if(wasSpace){const remaining=folders.filter((x:Folder)=>!x.parentId&&x.id!==f.id);setSpaceFilter(remaining[0]?.id||'');setFolderFilter('');setSelectedDoc(null)}else if(folderFilter===f.id){setFolderFilter('')}}
+  async function handleUpload(e:React.FormEvent){e.preventDefault();if(upStatus!=='idle'||!upFile||!upTitle||!upFolderId)return;setUpStatus('uploading');const fd=new FormData();fd.append('file',upFile);fd.append('title',upTitle);fd.append('category',upCat);fd.append('authorId',me?.id||'');fd.append('folderId',upFolderId);try{const res=await fetch('/api/documents',{method:'POST',body:fd});if(res.ok){const u=await res.json();setUpDoc(u);setUpStatus('done');setUpMsg('上传成功');refresh();window.dispatchEvent(new Event('folderRefresh'))}else{const e=await res.json().catch(()=>({}));setUpStatus('error');setUpMsg(e.error||'上传失败')}}catch{setUpStatus('error');setUpMsg('网络错误')}}
+  async function createFolder(name:string,parentId:string){if(!name.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),parentId,inheritPermissions:true})});loadData();window.dispatchEvent(new Event('folderRefresh'));setExpanded(prev=>{const n=new Set(prev);n.add(parentId);return n})}
+  async function createSpace(){if(!nsName.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nsName.trim(),parentId:null,companyId:nsCompanyId||null,inheritPermissions:true})});setNewSpaceOpen(false);setNsName('');setNsCompanyId('');loadData();window.dispatchEvent(new Event('folderRefresh'))}
+  async function renameFolder(f:Folder){const n=prompt('新名称:',f.name);if(n&&n!==f.name){await fetch('/api/folders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:f.id,name:n})});loadData();window.dispatchEvent(new Event('folderRefresh'))}}
+  async function deleteFolder(f:Folder){if(!confirm(`删除「${f.name}」？子文件夹和文件将移至上级目录。`))return;const wasSpace=spaceFilter===f.id;await fetch(`/api/folders?id=${f.id}`,{method:'DELETE'});loadData();refresh();window.dispatchEvent(new Event('folderRefresh'));if(wasSpace){const remaining=folders.filter((x:Folder)=>!x.parentId&&x.id!==f.id);setSpaceFilter(remaining[0]?.id||'');setFolderFilter('');setSelectedDoc(null)}else if(folderFilter===f.id){setFolderFilter('')}}
   async function triggerAi(doc:Doc){const res=await fetch(`/api/documents/${doc.id}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:doc.title,category:doc.category,fullContent:doc.fullContent||doc.content||''})});if(res.ok){refresh();const d=await res.json();setSelectedDoc(d?.document||d)}}
-  async function deleteDoc(doc:Doc){if(!confirm(`删除「${doc.title}」？`))return;await fetch(`/api/documents/${doc.id}`,{method:'DELETE'});refresh();setSelectedDoc(null)}
-  async function moveDocument(docId:string,fid:string|null){await fetch(`/api/documents/${docId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:fid||null})});refresh();setMoveDoc(null)}
+  async function deleteDoc(doc:Doc){if(!confirm(`删除「${doc.title}」？`))return;await fetch(`/api/documents/${doc.id}`,{method:'DELETE'});refresh();setSelectedDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
+  async function moveDocument(docId:string,fid:string|null){await fetch(`/api/documents/${docId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:fid||null})});refresh();setMoveDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
 
   if(loading)return <DocListSkeleton />
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* ═══ Left Sidebar: Folder Tree ═══ */}
-      <div className="w-64 shrink-0 border-r border-neutral-200 bg-white flex flex-col overflow-y-auto">
-        <div className="px-4 py-3 border-b border-neutral-100 flex items-center justify-between sticky top-0 bg-white z-10">
-          <span className="text-[0.82rem] font-semibold text-neutral-800">知识空间</span>
-          <button onClick={() => setNewSpaceOpen(true)} className="text-[0.72rem] text-[#2563EB] hover:text-blue-700 font-medium">+ 新建</button>
-        </div>
-        <div className="flex-1 px-2 py-2 space-y-0.5">
-          {spaces.length === 0 ? (
-            <p className="text-[0.78rem] text-neutral-400 px-2 py-4 text-center">暂无知识空间</p>
-          ) : spaces.map(f => (
-            <SidebarNode key={f.id} f={f} folders={folders} lv={0}
-              selId={spaceFilter || folderFilter}
-              onSelect={(id: string, isSpace: boolean) => {
-                if (isSpace) { setSpaceFilter(id); setFolderFilter('') }
-                else { setFolderFilter(id) }
-              }}
-              onContextMenu={(e: React.MouseEvent, id: string, isSpace: boolean) => {
-                e.preventDefault(); e.stopPropagation()
-                const sp = folders.find(x => x.id === id)
-                if (isSpace && sp) setSCtx({ x: e.clientX, y: e.clientY, space: sp })
-                else if (sp) setFCtx({ x: e.clientX, y: e.clientY, folder: sp })
-              }}
-            />
-          ))}
-        </div>
-      </div>
       {/* ═══ Center: File List ═══ */}
       <div className="flex-1 flex flex-col min-w-0 bg-[#F8F9FA]">
         {/* ═══ Unified Header: Breadcrumb + Toolbar (two rows, no divider) ═══ */}
@@ -344,7 +348,8 @@ function DocumentsContent() {
                   {canUpload && (
                     <th className="text-center px-2 py-2 w-[36px]">
                       <input type="checkbox"
-                        checked={selectedIds.size > 0 && selectedIds.size === filtered.filter(d => permOk(docPerm(d), 'edit')).length}
+                        checked={isAllSelected}
+                        ref={el => { if (el) el.indeterminate = isSomeSelected }}
                         onChange={selectAll}
                         className="w-3.5 h-3.5 rounded border-neutral-300 text-[#2563EB] focus:ring-[#2563EB] cursor-pointer" />
                     </th>
@@ -411,7 +416,21 @@ function DocumentsContent() {
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <span className="text-[0.72rem] text-neutral-500">{fileTypeLabel(d.title, d.category)}</span>
+                        <span className="text-[0.72rem] text-neutral-500">
+                          {(() => {
+                            if (d.fileType) {
+                              const ft = d.fileType.toLowerCase()
+                              if (ft === 'xlsx' || ft === 'xls') return 'Excel'
+                              if (ft === 'docx' || ft === 'doc') return 'Word'
+                              if (ft === 'pptx' || ft === 'ppt') return 'PPT'
+                              if (ft === 'pdf') return 'PDF'
+                              if (ft === 'txt') return 'TXT'
+                              if (ft === 'zip') return 'ZIP'
+                              return ft.toUpperCase()
+                            }
+                            return fileTypeLabel(d.title, d.category)
+                          })()}
+                        </span>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-[0.72rem] text-neutral-500">{d.updatedAt ? new Date(d.updatedAt).toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }) : '—'}</span>
@@ -576,10 +595,21 @@ function DocumentsContent() {
             <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">标题</label><input type="text" value={upTitle} onChange={e => setUpTitle(e.target.value)} className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-[0.85rem] focus:outline-none focus:border-[#2563EB]" required /></div>
             <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">存放位置</label><p className="text-[0.85rem] text-neutral-700 py-2 inline-flex items-center gap-1.5"><Folder size={15} strokeWidth={1.5} />{uploadTargetName}</p></div>
             <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">分类</label><select value={upCat} onChange={e => setUpCat(e.target.value)} className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-[0.85rem]">{Object.entries(CAT_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select></div>
-            <div className="flex items-center gap-2"><input type="checkbox" checked={upAiParse} onChange={e => setUpAiParse(e.target.checked)} id="aip" /><label htmlFor="aip" className="text-[0.8rem] text-neutral-600">AI 智能解析</label></div>
-            <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">文件 (.docx / .pptx)</label><input type="file" accept=".docx,.pptx,.ppt" onChange={e => { const f = e.target.files?.[0]; if (f) { setUpFile(f); if (!upTitle) setUpTitle(f.name.replace(/\.(docx|doc|pptx|ppt)$/i, '')) } }} className="w-full text-[0.82rem] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-[#2563EB] file:text-white" required /></div>
+            <div><label className="block text-[0.72rem] font-medium text-neutral-700 mb-1">文件</label><input type="file" accept=".docx,.pptx,.ppt,.pdf,.xlsx,.xls,.doc,.txt,.zip" onChange={e => { const f = e.target.files?.[0]; if (f) { setUpFile(f); if (!upTitle) setUpTitle(f.name.replace(/\.[^/.]+$/, '')) } }} className="w-full text-[0.82rem] file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-[#2563EB] file:text-white" required /></div>
             {upMsg && <div className={`text-[0.78rem] px-3 py-2 rounded-lg ${upStatus === 'done' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>{upMsg}</div>}
-            <div className="flex gap-3 pt-2"><button type="button" onClick={() => setShowUpload(false)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">取消</button><button type="submit" disabled={upStatus === 'uploading'} className="flex-1 px-4 py-2 bg-[#2563EB] text-white text-[0.82rem] rounded-lg hover:bg-blue-600 disabled:opacity-50">{upStatus === 'uploading' ? '上传中...' : '上传'}</button></div>
+            <div className="flex gap-3 pt-2">
+              {upStatus === 'done' ? (
+                <>
+                  <button type="button" onClick={() => { setShowUpload(false); resetUpload() }} className="flex-1 px-4 py-2 bg-[#2563EB] text-white text-[0.82rem] rounded-lg hover:bg-blue-600">完成</button>
+                  {upDoc && <button type="button" onClick={() => setShowAi(true)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">AI 解析</button>}
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setShowUpload(false)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">取消</button>
+                  <button type="submit" disabled={upStatus === 'uploading'} className="flex-1 px-4 py-2 bg-[#2563EB] text-white text-[0.82rem] rounded-lg hover:bg-blue-600 disabled:opacity-50">{upStatus === 'uploading' ? '上传中...' : '上传'}</button>
+                </>
+              )}
+            </div>
           </form>
         </DialogContent>
       </Dialog>

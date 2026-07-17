@@ -7,7 +7,7 @@
 | **生产域名** | https://academy.yuanshowroom.cn |
 | **服务器 IP** | `120.79.162.27` |
 | **SSH 用户** | `root` |
-| **SSH 密码** | `Huang991208` |
+| **SSH 认证** | 仅使用已授权 SSH 密钥；密码不得写入仓库 |
 | **项目路径** | `/var/www/yuan-academy` |
 | **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
 
@@ -17,9 +17,11 @@
 
 ```
 DEEPSEEK_API_KEY=<从本地.env.local获取>
-JWT_SECRET=353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6
+JWT_SECRET=<从密码管理器或部署平台 Secret 获取>
 NODE_ENV=production
 ```
+
+生产凭据只允许保存在服务器环境文件、GitHub Actions Secrets 或公司密码管理器中。禁止在 Markdown、源码、提交记录和聊天记录中保存真实值。若凭据曾进入 Git 历史，必须立即轮换；仅删除当前文件中的文字并不能撤销已经泄露的凭据。
 
 ## 部署工作流
 
@@ -184,7 +186,40 @@ cp prisma/dev.db /var/backups/yuan-academy-$(date +%Y%m%d).db
 | POST | `/api/admin/policy/ai-generate` | AI 生成政策结构化布局（super_admin，DeepSeek） |
 | GET | `/api/admin/policy/layout?brand=xxx` | 获取指定品牌的 AI 布局 |
 | PUT | `/api/admin/policy/layout` | 保存 AI 生成的品牌布局（super_admin） |
-| GET | `/showroom/data/policies.json` | 订货政策原始数据（14 品牌，11 字段） |
+| GET | `/api/policies` | 登录用户读取私有订货政策，响应禁止公共缓存 |
+| GET | `/api/policies/template` | 登录用户下载私有上传模板 |
+
+旧的 `/data/policies.json`、`/showroom/data/policies.json` 和公开模板路径已经停用，不得恢复。
+
+## 订货政策私有数据部署
+
+订货政策运行数据不提交到 Git，也不包含在 `.next` 构建包中。首次部署、迁移服务器或重建 `/var/www/yuan-academy` 时，必须单独配置以下目录：
+
+```text
+/var/www/yuan-academy/data/private/policies/
+├── policies.json
+├── policies.updated.json
+├── policies.backup.json
+└── 订货政策-上传模板.xlsx
+```
+
+目录权限设为 `750`，文件权限设为 `640`。传输应先进入服务器临时目录，校验 JSON 后再通过 `install` 原子写入目标位置。不得把这些文件复制到 `public/`、`.next/static/` 或 Nginx 静态目录。
+
+部署后验证：
+
+```bash
+ssh root@120.79.162.27 '
+  set -e
+  cd /var/www/yuan-academy
+  test "$(stat -c %a data/private/policies)" = 750
+  node -e "const p=require(\"./data/private/policies/policies.json\"); const rows=Array.isArray(p)?p:p.policies; if(!Array.isArray(rows)||rows.length===0) process.exit(1); console.log(rows.length)"
+  test ! -e public/data/policies.json
+  test ! -e public/showroom/data/policies.json
+  test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/api/policies)" = 401
+'
+```
+
+登录态还需在浏览器访问 `/internal/policy`，确认品牌数量和更新时间正常显示。自动部署不得删除 `data/private/`；使用 `rsync --delete` 时必须把该目录加入排除列表。
 
 ### 政策结构化解析示例
 
@@ -231,6 +266,7 @@ bash scripts/deploy-local.sh
 | **登录 500** | 检查 `.env.local` 是否存在，Prisma Client 是否最新 |
 | **退出登录跳错** | 确认 logout API 返回 `307` 而非 `500` |
 | **xattr 警告刷屏** | 本地构建前 `xattr -cr .next` 清除 macOS 扩展属性（脚本已自动处理） |
+| **订货政策数据不存在** | 检查 `data/private/policies/policies.json` 是否存在、JSON 是否含非空数组以及目录/文件权限是否为 `750`/`640`；禁止从公开目录回退读取 |
 
 ## CI/CD 自动部署（GitHub Actions）
 
@@ -238,25 +274,14 @@ bash scripts/deploy-local.sh
 
 #### 第一步：在 GitHub 仓库添加 Secrets
 
-把你的仓库 `vvJ1101/yuan-academy` 的 Settings → Secrets and variables → Actions → New repository secret 添加以下 4 个密钥：
+把你的仓库 `vvJ1101/yuan-academy` 的 Settings → Secrets and variables → Actions → New repository secret 添加以下密钥：
 
 | 密钥名称 | 值（以下面的为准） |
 |----------|----------------|
 | `SERVER_HOST` | `120.79.162.27` |
 | `SERVER_USER` | `root` |
-| `SSH_PRIVATE_KEY` | 下面的私钥（从 `-----BEGIN OPENSSH PRIVATE KEY-----` 到 `-----END OPENSSH PRIVATE KEY-----` 整段复制） |
+| `SSH_PRIVATE_KEY` | 从公司密码管理器复制专用部署私钥 |
 | `DEEPSEEK_API_KEY` | 从本地 `.env.local` 复制 |
-| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
+| `JWT_SECRET` | 从公司密码管理器复制独立的高强度随机值 |
 
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-```
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FAAAAJh7Wqg8e1qo
-PAAAAAtzc2gtZWQyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FA
-AAAEC9hpKFwpsSSQoq+fyhO+uEb2wfhPjBgTyjMGdFnK/xylq630GAsF9cJ+wwi16j4m4n
-Qkt+x5iR2C1v309YCrYUAAAAFWdpdGh1Yi1hY3Rpb25zLWRlcGxveQ==
------END OPENSSH PRIVATE KEY-----
-```
+配置完成后轮换所有曾经出现在仓库历史中的 SSH、JWT 和服务器登录凭据，并同步更新服务器与 GitHub Actions Secrets。

@@ -73,9 +73,13 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
   const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-  const maxSort = parentId
-    ? (await prisma.folder.findFirst({ where: { parentId }, orderBy: { sortOrder: 'desc' }, select: { sortOrder: true } }))?.sortOrder ?? 0
-    : 0
+  // 查询同级文件夹的最大 sortOrder（包括根级 parentId=null 的情况）
+  const maxSortSibling = await prisma.folder.findFirst({
+    where: parentId ? { parentId } : { parentId: null },
+    orderBy: { sortOrder: 'desc' },
+    select: { sortOrder: true },
+  })
+  const maxSort = maxSortSibling?.sortOrder ?? 0
 
   const folder = await prisma.folder.create({
     data: {

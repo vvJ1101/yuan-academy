@@ -5,6 +5,22 @@ import { getFolderPermission, getDocumentPermission, type Permission } from '@/l
 import { statSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 
+/** 从磁盘文件计算文件大小和类型（GET/POST 共用） */
+function getFileMeta(docId: string): { fileSize: number | null; fileType: string | null } {
+  try {
+    const docDir = join(process.cwd(), 'public', 'uploads', 'documents', docId)
+    const files = ['original.docx', 'original.pptx', 'original.pdf', 'original.xlsx', 'original.xls', 'original.doc', 'original.ppt', 'original.txt', 'original.zip']
+    for (const name of files) {
+      try {
+        const fileSize = statSync(join(docDir, name)).size
+        const fileType = name.replace('original.', '')
+        return { fileSize, fileType }
+      } catch { /* try next */ }
+    }
+  } catch { /* dir not found */ }
+  return { fileSize: null, fileType: null }
+}
+
 export async function GET(req: NextRequest) {
   const session = getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -74,17 +90,12 @@ export async function GET(req: NextRequest) {
       }
     }
     let fileSize: number | null = null
-    try {
-      const docDir = join(process.cwd(), 'public', 'uploads', 'documents', doc.id)
-      for (const name of ['original.docx', 'original.pptx']) {
-        try {
-          fileSize = statSync(join(docDir, name)).size
-          break
-        } catch { /* try next */ }
-      }
-    } catch { fileSize = null }
+    let fileType: string | null = null
+    const meta = getFileMeta(doc.id)
+    fileSize = meta.fileSize
+    fileType = meta.fileType
     const { condensedContent, fullContent, ...rest } = doc
-    return { ...rest, summary, userPermission, fileSize, hasAiSummary: !!condensedContent }
+    return { ...rest, summary, userPermission, fileSize, fileType, hasAiSummary: !!condensedContent }
   }))
 
   return NextResponse.json(withMeta)
@@ -122,7 +133,8 @@ export async function POST(req: NextRequest) {
 
   const docDir = join(process.cwd(), 'public', 'uploads', 'documents', doc.id)
   if (!existsSync(docDir)) mkdirSync(docDir, { recursive: true })
-  const ext = isPpt ? 'pptx' : 'docx'
+  
+  const ext = fileName.split('.').pop()?.toLowerCase() || 'docx'
   try { writeFileSync(join(docDir, `original.${ext}`), buffer) } catch {}
 
   if (isPpt) {
@@ -150,7 +162,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ...updated,
       conversion: result.success ? 'ok' : ('failed: ' + result.error),
+      ...getFileMeta(doc.id),
     }, { status: 201 })
+  }
+
+  // ── PDF, Excel, etc. → direct upload (no parsing) ──
+  const isDocx = /\.docx?$/i.test(fileName)
+  if (!isDocx) {
+    const audienceIds = (formData.get('audienceIds') as string)?.split(',').filter(Boolean) || []
+    if (audienceIds.length > 0) {
+      await Promise.all(audienceIds.map((deptId: string) =>
+        prisma.documentAudience.create({ data: { documentId: doc.id, departmentId: deptId } })
+          .catch((err: any) => console.error("[AuditLogError]", err))
+      ))
+    }
+    const updated = await prisma.document.update({
+      where: { id: doc.id },
+      data: {
+        fullContent: `> 该文档为 ${ext.toUpperCase()} 文件，可直接下载查看。\n\n[下载文件](/uploads/documents/${doc.id}/original.${ext})`,
+        displayMode: 'full',
+      },
+    })
+    return NextResponse.json({ ...updated, conversion: 'none', message: '直接上传模式，文件已保存', ...getFileMeta(doc.id) }, { status: 201 })
   }
 
   // ── DOCX → Markdown ──
@@ -180,5 +213,6 @@ export async function POST(req: NextRequest) {
     parseStats: result.stats,
     imageCount: result.imageCount,
     parseWarnings: result.warnings,
+    ...getFileMeta(doc.id),
   }, { status: 201 })
 }

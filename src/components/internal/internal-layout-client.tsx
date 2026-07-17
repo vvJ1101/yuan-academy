@@ -339,7 +339,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
         <div className={`
           fixed lg:static inset-y-0 left-0 z-50 w-[260px] shrink-0
           transition-transform duration-200 ease-out
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:!transform-none'}
         `}>
           <InternalSidebar onClose={() => setSidebarOpen(false)} />
         </div>

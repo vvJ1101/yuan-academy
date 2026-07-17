@@ -99,7 +99,7 @@ export default function SearchPage() {
             {results.map((r) => (
               <Link
                 key={r.id}
-                href={`/internal/docs/${r.audienceSlug || 'marketing'}/${encodeURIComponent(r.slug)}`}
+                href={`/internal/docs/${r.audienceSlug || 'marketing'}/${encodeURIComponent(r.slug)}?from=search&highlight=${encodeURIComponent(query.trim())}`}
                 className="block p-5 bg-white border border-neutral-200 rounded-xl hover:border-neutral-400 transition-colors no-underline"
               >
                 <div className="flex items-center gap-3 mb-1.5">
