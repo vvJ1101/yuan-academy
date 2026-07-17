@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookies, prisma } from '@/lib/auth'
 import { logEdit } from '@/lib/audit'
-import { createDocumentHistorySnapshot, finalizeDocumentReplacement, processDocumentFile } from '@/lib/document-processor'
+import { createDocumentHistorySnapshot, finalizeDocumentReplacement, getDocumentProcessorErrorMessage, processDocumentFile } from '@/lib/document-processor'
 import { getOriginalFilePath, getPreviewFilePath, validateUploadFile } from '@/lib/document-files'
 import { canEdit } from '@/lib/permissions/documents'
 import { getDocumentPermission } from '@/lib/permissions/folders'
@@ -97,7 +97,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     })
     await logEdit(session.id, doc.id)
     return NextResponse.json({ ok: true, processing: processed, parseStats: finalized.parseStats })
-  } catch {
-    return NextResponse.json({ error: '替换处理失败，系统已保留或恢复可用的原文件状态' }, { status: 500 })
+  } catch (error) {
+    const operationalMessage = getDocumentProcessorErrorMessage(error)
+    return NextResponse.json({
+      error: operationalMessage || '替换处理失败，请稍后重试或联系管理员',
+    }, { status: 500 })
   }
 }

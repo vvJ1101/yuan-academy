@@ -35,6 +35,8 @@ interface ProcessorDependencies {
   deferReady?: boolean
   replacement?: boolean
   renameFile?: (source: string, destination: string) => Promise<void>
+  removeBackup?: (path: string) => Promise<void>
+  log?: (message: string) => void
 }
 
 interface ProcessInput {
@@ -48,6 +50,17 @@ export interface StorageSummary {
   usedGB: number
   totalGB: 100
   percent: number
+}
+
+export class DocumentProcessorOperationalError extends Error {
+  constructor(public readonly category: 'manual_recovery_required' | 'backup_cleanup_required', message: string) {
+    super(message)
+    this.name = 'DocumentProcessorOperationalError'
+  }
+}
+
+export function getDocumentProcessorErrorMessage(error: unknown): string | null {
+  return error instanceof DocumentProcessorOperationalError ? error.message : null
 }
 
 export function createDocumentHistorySnapshot(document: {
@@ -97,6 +110,8 @@ export async function processDocumentFile(
   const stagingPath = join(docDir, `.original-${randomUUID()}.staging`)
   const backupPath = join(docDir, `.original-${randomUUID()}.backup`)
   const renameFile = dependencies.renameFile ?? rename
+  const removeBackup = dependencies.removeBackup ?? (path => rm(path, { force: true }))
+  const log = dependencies.log ?? (message => console.error(message))
   const updateMetadata = dependencies.updateMetadata
     ?? ((changes: MetadataChanges) => defaultMetadataUpdater(input.documentId, changes))
 
@@ -126,7 +141,16 @@ export async function processDocumentFile(
     await renameFile(stagingPath, originalPath)
   } catch (error) {
     await rm(stagingPath, { force: true }).catch(() => undefined)
-    if (hasBackup) await restoreBackup()
+    if (hasBackup) {
+      try { await restoreBackup() } catch {
+        const message = '自动恢复失败，安全备份已保留，请联系管理员'
+        log(`[DocumentProcessor] docId=${input.documentId} stage=restore category=rename_failed`)
+        await updateMetadata({ processingStatus: 'failed', processingError: message }).catch(() => {
+          log(`[DocumentProcessor] docId=${input.documentId} stage=restore category=metadata_update_failed`)
+        })
+        throw new DocumentProcessorOperationalError('manual_recovery_required', message)
+      }
+    }
     const processingError = '原文件保存失败，请重试'
     if (!dependencies.replacement) {
       await updateMetadata({ processingStatus: 'failed', processingError, previewPath: null })
@@ -147,13 +171,34 @@ export async function processDocumentFile(
   } catch {
     if (dependencies.replacement) {
       await rm(originalPath, { force: true }).catch(() => undefined)
-      if (hasBackup) await restoreBackup()
+      if (hasBackup) {
+        try { await restoreBackup() } catch {
+          const message = '自动恢复失败，安全备份已保留，请联系管理员'
+          log(`[DocumentProcessor] docId=${input.documentId} stage=restore category=rename_failed`)
+          await updateMetadata({ processingStatus: 'failed', processingError: message }).catch(() => {
+            log(`[DocumentProcessor] docId=${input.documentId} stage=restore category=metadata_update_failed`)
+          })
+          throw new DocumentProcessorOperationalError('manual_recovery_required', message)
+        }
+      }
       await rm(stagingPath, { force: true }).catch(() => undefined)
       throw new Error('文档元数据更新失败，已恢复原文件')
     }
     throw new Error('文档元数据更新失败')
   }
-  if (hasBackup) await rm(backupPath, { force: true }).catch(() => undefined)
+  if (hasBackup) {
+    try {
+      await removeBackup(backupPath)
+      hasBackup = false
+    } catch {
+      const message = '旧文件安全备份清理失败，请联系管理员'
+      log(`[DocumentProcessor] docId=${input.documentId} stage=cleanup category=remove_failed`)
+      await updateMetadata({ processingStatus: 'failed', processingError: message }).catch(() => {
+        log(`[DocumentProcessor] docId=${input.documentId} stage=cleanup category=metadata_update_failed`)
+      })
+      throw new DocumentProcessorOperationalError('backup_cleanup_required', message)
+    }
+  }
 
   try {
     await dependencies.afterOriginalStored?.()
@@ -185,7 +230,10 @@ export async function calculateDocumentStorage(
     for (const directory of directories) {
       if (!directory.isDirectory()) continue
       const files = await readdir(join(root, directory.name), { withFileTypes: true })
-      const originals = files.filter(file => file.isFile() && /^original\.(docx|pdf|ppt|pptx|xls|xlsx)$/.test(file.name))
+      const originals = files.filter(file => file.isFile() && (
+        /^original\.(docx|pdf|ppt|pptx|xls|xlsx)$/.test(file.name)
+        || /^\.original-[A-Fa-f0-9-]+\.backup$/.test(file.name)
+      ))
       for (const original of originals) usedBytes += (await stat(join(root, directory.name, original.name))).size
     }
   } catch (error) {

@@ -30,4 +30,6 @@ test('replacement route keeps history JSON whole and returns Chinese history fai
   assert.match(source, /创建替换前备份失败，原文件未变更/)
   assert.match(source, /deferReady:\s*true/)
   assert.match(source, /processingStatus:\s*'failed'/)
+  assert.match(source, /getDocumentProcessorErrorMessage\(error\)/)
+  assert.doesNotMatch(source, /系统已保留或恢复可用的原文件状态/)
 })

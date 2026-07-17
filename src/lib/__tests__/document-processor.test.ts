@@ -197,3 +197,55 @@ test('replacement write or rename failure preserves old ready files and does not
   assert.equal((await readFile(join(dir, 'preview.pdf'))).toString(), 'old-preview')
   assert.deepEqual((await readdir(dir)).filter(file => file.includes('.backup') || file.includes('.staging')), [])
 })
+
+test('restore failure preserves backup, marks manual recovery, and logs only sanitized context', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const dir = join(root, 'restore-fail'); await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'original.pdf'), 'old-sensitive-content')
+  await writeFile(join(dir, 'preview.pdf'), 'old-preview')
+  const metadata: Record<string, unknown>[] = []; const logs: string[] = []
+  let metadataCalls = 0
+  await assert.rejects(processDocumentFile({ documentId: 'restore-fail', buffer: Buffer.from('new-content'), upload: upload('pdf', 'sensitive-name.pdf') }, {
+    root, replacement: true,
+    renameFile: async (source, destination) => {
+      if (source.endsWith('.backup')) throw new Error(`/private/path/${source}`)
+      await rename(source, destination)
+    },
+    updateMetadata: async changes => {
+      metadataCalls += 1
+      if (metadataCalls === 1) throw new Error('db transition failed')
+      metadata.push(changes)
+    },
+    log: message => { logs.push(message) },
+  }), /自动恢复失败，安全备份已保留，请联系管理员/)
+  const files = await readdir(dir)
+  assert.equal(files.some(file => file.endsWith('.backup')), true)
+  assert.equal(files.includes('original.pdf'), false)
+  assert.equal(metadata.at(-1)?.processingStatus, 'failed')
+  assert.match(String(metadata.at(-1)?.processingError), /联系管理员/)
+  assert.deepEqual(logs, ['[DocumentProcessor] docId=restore-fail stage=restore category=rename_failed'])
+  assert.doesNotMatch(logs.join(' '), new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  assert.doesNotMatch(logs.join(' '), /sensitive-name|old-sensitive-content/)
+})
+
+test('backup cleanup failure blocks success, preserves backup, and marks cleanup required', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const dir = join(root, 'cleanup-fail'); await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'original.pdf'), 'old-content')
+  await writeFile(join(dir, 'preview.pdf'), 'old-preview')
+  const metadata: Record<string, unknown>[] = []; const logs: string[] = []
+  await assert.rejects(processDocumentFile({ documentId: 'cleanup-fail', buffer: Buffer.from('new-content'), upload: upload('pdf') }, {
+    root, replacement: true,
+    updateMetadata: async changes => { metadata.push(changes) },
+    removeBackup: async () => { throw new Error('/secret/backup/path') },
+    log: message => { logs.push(message) },
+  }), /旧文件安全备份清理失败，请联系管理员/)
+  const files = await readdir(dir)
+  assert.equal(files.some(file => file.endsWith('.backup')), true)
+  assert.equal((await readFile(join(dir, 'original.pdf'))).toString(), 'new-content')
+  assert.equal(metadata.at(-1)?.processingStatus, 'failed')
+  assert.match(String(metadata.at(-1)?.processingError), /备份清理失败/)
+  assert.equal((await calculateDocumentStorage(root)).usedBytes, Buffer.byteLength('old-content') + Buffer.byteLength('new-content'))
+  assert.deepEqual(logs, ['[DocumentProcessor] docId=cleanup-fail stage=cleanup category=remove_failed'])
+  assert.doesNotMatch(logs.join(' '), /secret|backup\/path/)
+})
