@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises'
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookies, prisma } from '@/lib/auth'
 import { logEdit } from '@/lib/audit'
-import { processDocumentFile } from '@/lib/document-processor'
+import { createDocumentHistorySnapshot, finalizeDocumentReplacement, processDocumentFile } from '@/lib/document-processor'
 import { getOriginalFilePath, getPreviewFilePath, validateUploadFile } from '@/lib/document-files'
 import { canEdit } from '@/lib/permissions/documents'
 import { getDocumentPermission } from '@/lib/permissions/folders'
@@ -36,21 +36,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   const buffer = Buffer.from(await file.arrayBuffer())
 
-  await prisma.documentHistory.create({
-    data: {
-      documentId: doc.id,
-      content: JSON.stringify({
-        title: doc.title, content: doc.content, fullContent: doc.fullContent,
-        condensedContent: doc.condensedContent, displayMode: doc.displayMode,
-      }).substring(0, 100000),
-      editorId: session.id,
-      editorName: session.name || session.departmentName || '未知用户',
-      remark: '替换原始文件前自动备份',
-    },
-  })
+  try {
+    await prisma.documentHistory.create({
+      data: {
+        documentId: doc.id,
+        content: createDocumentHistorySnapshot({
+          title: doc.title, content: doc.content, fullContent: doc.fullContent,
+          condensedContent: doc.condensedContent, displayMode: doc.displayMode,
+        }),
+        editorId: session.id,
+        editorName: session.name || session.departmentName || '未知用户',
+        remark: '替换原始文件前自动备份',
+      },
+    })
+  } catch {
+    return NextResponse.json({ error: '创建替换前备份失败，原文件未变更' }, { status: 500 })
+  }
 
   try {
     const processed = await processDocumentFile({ documentId: doc.id, buffer, upload }, {
+      deferReady: true,
       afterOriginalStored: async () => {
         await rm(getPreviewFilePath(doc.id), { force: true })
         if (doc.fileType && doc.fileType !== upload.fileType) {
@@ -59,21 +64,39 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
     })
     if (processed.originalStored === false) return NextResponse.json({ error: '原文件保存失败，请重试' }, { status: 500 })
+    const finalized = await finalizeDocumentReplacement({
+      prepare: async () => {
+        let fullContent = `> 该文档为 ${upload.fileType.toUpperCase()} 文件，请使用在线阅读器查看。`
+        let displayMode = upload.fileType === 'pdf' || upload.fileType === 'ppt' || upload.fileType === 'pptx' ? 'pdf' : 'full'
+        let parseStats: unknown
+        if (upload.fileType === 'docx') {
+          const { parseDocx } = await import('@/lib/parser')
+          const parsed = await parseDocx(buffer, doc.id)
+          fullContent = parsed.markdown.substring(0, 100000)
+          displayMode = 'full'
+          parseStats = parsed.stats
+        }
+        return { fullContent, displayMode, parseStats }
+      },
+      commit: async value => {
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: {
+            fullContent: value.fullContent, content: value.fullContent, displayMode: value.displayMode,
+            processingStatus: processed.status, processingError: processed.status === 'ready' ? null : processed.error,
+          },
+        })
+      },
+      markFailed: async () => {
+        await prisma.document.update({
+          where: { id: doc.id },
+          data: { processingStatus: 'failed', processingError: '替换文件后续处理失败，请重试' },
+        })
+      },
+    })
     await logEdit(session.id, doc.id)
-
-    let fullContent = `> 该文档为 ${upload.fileType.toUpperCase()} 文件，请使用在线阅读器查看。`
-    let displayMode = upload.fileType === 'pdf' || upload.fileType === 'ppt' || upload.fileType === 'pptx' ? 'pdf' : 'full'
-    let parseStats: unknown
-    if (upload.fileType === 'docx') {
-      const { parseDocx } = await import('@/lib/parser')
-      const parsed = await parseDocx(buffer, doc.id)
-      fullContent = parsed.markdown.substring(0, 100000)
-      displayMode = 'full'
-      parseStats = parsed.stats
-    }
-    await prisma.document.update({ where: { id: doc.id }, data: { fullContent, content: fullContent, displayMode } })
-    return NextResponse.json({ ok: true, processing: processed, parseStats })
+    return NextResponse.json({ ok: true, processing: processed, parseStats: finalized.parseStats })
   } catch {
-    return NextResponse.json({ error: '替换文件失败，原文档记录已保留' }, { status: 500 })
+    return NextResponse.json({ error: '替换后续处理失败，新原文件已保存并标记为失败' }, { status: 500 })
   }
 }

@@ -5,7 +5,8 @@ import { processDocumentFile } from '@/lib/document-processor'
 import { getOriginalFilePath, validateUploadFile } from '@/lib/document-files'
 import { logUpload } from '@/lib/audit'
 import { buildDocumentWhere, canUploadToFolder } from '@/lib/permissions/documents'
-import { getDocumentPermission, getFolderPermission } from '@/lib/permissions/folders'
+import { getFolderPermission, getFolderPermissionsForDocuments } from '@/lib/permissions/folders'
+import { resolveDocumentPermission } from '@/lib/permissions/document-resolution'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest) {
     select: {
       id: true, title: true, slug: true, category: true, updatedAt: true,
       ownerDeptId: true, folderId: true, condensedContent: true, fullContent: true,
+      overridePermissions: true,
+      documentPermissions: { select: { companyId: true, departmentId: true, userId: true, role: true, permission: true } },
       originalFileName: true, fileType: true, fileSize: true, processingStatus: true, processingError: true,
       ownerDept: { select: { name: true, slug: true } },
       folder: { select: { id: true, name: true } },
@@ -37,13 +40,18 @@ export async function GET(req: NextRequest) {
     orderBy: { updatedAt: 'desc' },
   })
 
-  const withMeta = await Promise.all(docs.map(async doc => {
+  const folderPermissions = await getFolderPermissionsForDocuments(session, docs.map(doc => doc.folderId))
+  const withMeta = docs.map(doc => {
     let summary = doc.condensedContent.match(/^> (.+)/m)?.[1]?.trim() ?? ''
     if (!summary && doc.fullContent) summary = doc.fullContent.replace(/[#*>\n]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 80)
-    const userPermission = await getDocumentPermission(session, doc.id)
-    const { condensedContent, fullContent, ...rest } = doc
+    const userPermission = resolveDocumentPermission(
+      session,
+      doc,
+      doc.folderId ? folderPermissions.get(doc.folderId) ?? null : null,
+    )
+    const { condensedContent, fullContent, documentPermissions: _documentPermissions, overridePermissions: _overridePermissions, ...rest } = doc
     return { ...rest, summary, userPermission, hasAiSummary: Boolean(condensedContent) }
-  }))
+  })
 
   return NextResponse.json(withMeta)
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { calculateDocumentStorage, processDocumentFile } from '../document-processor'
+import { calculateDocumentStorage, createDocumentHistorySnapshot, finalizeDocumentReplacement, processDocumentFile } from '../document-processor'
 import type { ValidatedUpload } from '../document-files'
 
 function upload(fileType: ValidatedUpload['fileType'], name = `training.${fileType}`): ValidatedUpload {
@@ -116,4 +116,45 @@ test('storage totals include only original DOCX/PDF/PPTX/XLSX files', async (t) 
     totalGB: 100,
     percent: 0,
   })
+})
+
+test('storage totals every original when a document directory contains multiple originals', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const dir = join(root, 'multi'); await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'original.pdf'), Buffer.alloc(11))
+  await writeFile(join(dir, 'original.pptx'), Buffer.alloc(13))
+  await writeFile(join(dir, 'preview.pdf'), Buffer.alloc(100))
+  assert.equal((await calculateDocumentStorage(root)).usedBytes, 24)
+})
+
+test('replacement processing can defer ready until content is committed', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const changes: Record<string, unknown>[] = []
+  const result = await processDocumentFile({ documentId: 'deferred', buffer: Buffer.from('pdf!'), upload: upload('pdf') }, {
+    root, deferReady: true, updateMetadata: async changeset => { changes.push(changeset) },
+  })
+  assert.equal(result.status, 'ready')
+  assert.equal(changes.at(-1)?.processingStatus, 'processing')
+})
+
+test('history snapshot remains complete valid JSON for content larger than 100k', () => {
+  const document = { title: '培训', content: 'a'.repeat(120_000), fullContent: 'b', condensedContent: 'c', displayMode: 'full' }
+  assert.deepEqual(JSON.parse(createDocumentHistorySnapshot(document)), document)
+})
+
+test('replacement finalization marks failed when parsing or final update fails', async () => {
+  for (const failure of ['parse', 'commit'] as const) {
+    let failed = false
+    await assert.rejects(finalizeDocumentReplacement({
+      prepare: async () => {
+        if (failure === 'parse') throw new Error('parse failed')
+        return { fullContent: 'new' }
+      },
+      commit: async () => {
+        if (failure === 'commit') throw new Error('update failed')
+      },
+      markFailed: async () => { failed = true },
+    }))
+    assert.equal(failed, true)
+  }
 })

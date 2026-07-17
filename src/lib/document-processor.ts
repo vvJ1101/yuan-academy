@@ -32,6 +32,7 @@ interface ProcessorDependencies {
     docDir: string,
   ) => Promise<ConversionResult>
   afterOriginalStored?: () => Promise<void>
+  deferReady?: boolean
 }
 
 interface ProcessInput {
@@ -45,6 +46,31 @@ export interface StorageSummary {
   usedGB: number
   totalGB: 100
   percent: number
+}
+
+export function createDocumentHistorySnapshot(document: {
+  title: string
+  content: string
+  fullContent: string
+  condensedContent: string
+  displayMode: string
+}): string {
+  return JSON.stringify(document)
+}
+
+export async function finalizeDocumentReplacement<T>(options: {
+  prepare: () => Promise<T>
+  commit: (value: T) => Promise<void>
+  markFailed: () => Promise<void>
+}): Promise<T> {
+  try {
+    const value = await options.prepare()
+    await options.commit(value)
+    return value
+  } catch (error) {
+    await options.markFailed().catch(() => undefined)
+    throw error
+  }
 }
 
 function shortProcessingError(error: unknown): string {
@@ -97,13 +123,13 @@ export async function processDocumentFile(
       const converter = dependencies.convertPpt ?? (await import('./ppt-converter')).convertPptToPdf
       const converted = await converter(input.buffer, input.upload.fileType, input.documentId, docDir)
       if (!converted.success) throw new Error(converted.error || 'PPT conversion failed')
-      await updateMetadata({ processingStatus: 'ready', processingError: null, previewPath: 'preview.pdf' })
+      await updateMetadata({ processingStatus: dependencies.deferReady ? 'processing' : 'ready', processingError: null, previewPath: 'preview.pdf' })
       return { status: 'ready', hasPreview: true }
     }
 
     const hasPreview = input.upload.fileType === 'pdf'
     if (hasPreview) await copyFile(originalPath, join(docDir, 'preview.pdf'))
-    await updateMetadata({ processingStatus: 'ready', processingError: null, previewPath: hasPreview ? 'preview.pdf' : null })
+    await updateMetadata({ processingStatus: dependencies.deferReady ? 'processing' : 'ready', processingError: null, previewPath: hasPreview ? 'preview.pdf' : null })
     return { status: 'ready', hasPreview }
   } catch (error) {
     const processingError = shortProcessingError(error)
@@ -121,8 +147,8 @@ export async function calculateDocumentStorage(
     for (const directory of directories) {
       if (!directory.isDirectory()) continue
       const files = await readdir(join(root, directory.name), { withFileTypes: true })
-      const original = files.find(file => file.isFile() && /^original\.(docx|pdf|ppt|pptx|xls|xlsx)$/.test(file.name))
-      if (original) usedBytes += (await stat(join(root, directory.name, original.name))).size
+      const originals = files.filter(file => file.isFile() && /^original\.(docx|pdf|ppt|pptx|xls|xlsx)$/.test(file.name))
+      for (const original of originals) usedBytes += (await stat(join(root, directory.name, original.name))).size
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
