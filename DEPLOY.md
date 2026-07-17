@@ -28,12 +28,15 @@ NODE_ENV=production
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
 - SSH 登录信息已通过安全渠道配置
-- 本地 Node.js >= 18
+- 本地 Node.js >= 20.16.0；部署前运行 `node -v` 确认版本
+- 服务器部署前同样运行 `node -v`，确认 Node.js >= 20.16.0
 
 ### 一键部署脚本
 
 ```bash
 cd /Users/vv/Documents/YUAN开发/yuan-academy
+# 必须先确认本地 Node.js >= 20.16.0
+node -v
 bash scripts/deploy-local.sh
 ```
 
@@ -50,6 +53,8 @@ bash scripts/deploy-local.sh
 ```bash
 # 1. 本地构建
 cd /Users/vv/Documents/YUAN开发/yuan-academy
+# 必须确认输出版本 >= 20.16.0
+node -v
 [ -d .next ] && find .next -maxdepth 1 ! -name .next ! -name cache -exec rm -rf {} +
 NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
@@ -73,6 +78,8 @@ scp /tmp/next-build.tar root@120.79.162.27:/tmp/
 # 4. 服务器部署
 ssh root@120.79.162.27 "
   cd /var/www/yuan-academy
+  # 必须确认输出版本 >= 20.16.0，否则停止部署并先升级 Node.js
+  node -v
   
   # 备份并解压
   rm -rf .next.backup
@@ -140,7 +147,7 @@ ssh root@120.79.162.27 "
 | **Swap** | 2 GB（已激活） |
 | **磁盘** | 40 GB（约 11GB 已用） |
 | **PM2 模式** | fork，单实例，512MB 内存上限 |
-| **Node.js** | v20.x |
+| **Node.js** | >= v20.16.0（每次部署前运行 `node -v` 验证） |
 | **端口** | 3001（Next.js）← nginx 代理 443（HTTPS） |
 
 ### 确认服务器运行状态
