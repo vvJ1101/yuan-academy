@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const companies = await prisma.company.findMany({
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { name, slug, description } = await req.json()
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { id, name, slug, description } = await req.json()
@@ -58,7 +58,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') return forbid()
 
   const { searchParams } = new URL(req.url)

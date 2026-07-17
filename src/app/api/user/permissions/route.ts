@@ -5,7 +5,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id) return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
 
   // Get user's roles

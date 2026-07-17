@@ -4,7 +4,7 @@ import { clearPermCache } from '@/lib/permissions/folders'
 
 // GET /api/folders/permissions?folderId=xxx
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/folders/permissions — add permission rule
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/folders/permissions?id=xxx
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }

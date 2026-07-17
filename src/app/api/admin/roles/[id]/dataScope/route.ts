@@ -9,7 +9,7 @@ const SCOPE_MAP: Record<string, number> = {
 }
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id) return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   const role = await prisma.sysRole.findUnique({ where: { id: params.id }, select: { dataScope: true, customDeptIds: true } })
   if (!role) return NextResponse.json({ code: 404, message: 'Not found' }, { status: 404 })
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   }

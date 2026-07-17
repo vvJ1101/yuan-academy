@@ -3,7 +3,7 @@ import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { ocrDocumentImages } from '@/lib/ocr'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin' && session.role !== 'dept_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

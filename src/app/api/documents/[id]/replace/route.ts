@@ -5,7 +5,7 @@ import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { canEditDocument } from '@/lib/permissions/documents'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const formData = await req.formData()

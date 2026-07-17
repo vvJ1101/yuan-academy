@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic'
 
 // GET /api/admin/roles — list with pagination + search
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   }
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/roles — create role
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   }

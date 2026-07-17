@@ -5,9 +5,9 @@
 | 项目 | 值 |
 |------|-----|
 | **生产域名** | https://academy.yuanshowroom.cn |
-| **服务器 IP** | `120.79.162.27` |
-| **SSH 用户** | `root` |
-| **SSH 认证** | 仅使用已授权 SSH 密钥；密码不得写入仓库 |
+| **服务器地址** | 从安全的密码管理器或运维平台获取 |
+| **SSH 用户** | 从安全的密码管理器或运维平台获取 |
+| **SSH 凭据** | 禁止写入本文档或提交到 Git |
 | **项目路径** | `/var/www/yuan-academy` |
 | **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
 
@@ -16,8 +16,8 @@
 环境变量在服务器 `.env.local` 中，**不要提交到 Git**：
 
 ```
-DEEPSEEK_API_KEY=<从本地.env.local获取>
-JWT_SECRET=<从密码管理器或部署平台 Secret 获取>
+DEEPSEEK_API_KEY=<从密码管理器或部署平台注入>
+JWT_SECRET=<使用密码生成器创建的高强度随机值>
 NODE_ENV=production
 ```
 
@@ -27,7 +27,7 @@ NODE_ENV=production
 
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
-- SSH 免密登录已配置：`ssh root@120.79.162.27`
+- SSH 登录信息已通过安全渠道配置
 - 本地 Node.js >= 18
 
 ### 一键部署脚本
@@ -278,10 +278,10 @@ bash scripts/deploy-local.sh
 
 | 密钥名称 | 值（以下面的为准） |
 |----------|----------------|
-| `SERVER_HOST` | `120.79.162.27` |
-| `SERVER_USER` | `root` |
-| `SSH_PRIVATE_KEY` | 从公司密码管理器复制专用部署私钥 |
-| `DEEPSEEK_API_KEY` | 从本地 `.env.local` 复制 |
-| `JWT_SECRET` | 从公司密码管理器复制独立的高强度随机值 |
+| `SERVER_HOST` | 从运维平台获取，不写入仓库 |
+| `SERVER_USER` | 使用最小权限部署账号，不在仓库公开具体值 |
+| `SSH_PRIVATE_KEY` | 新建专用部署密钥，并只保存到 GitHub Actions Secrets |
+| `DEEPSEEK_API_KEY` | 从密码管理器复制到 GitHub Actions Secrets |
+| `JWT_SECRET` | 使用密码生成器创建并保存到 GitHub Actions Secrets |
 
-配置完成后轮换所有曾经出现在仓库历史中的 SSH、JWT 和服务器登录凭据，并同步更新服务器与 GitHub Actions Secrets。
+> 安全要求：私钥、密码和实际环境变量值不得出现在 Markdown、Issue、PR、日志或 Git 历史中。发现泄露后必须立即撤销旧凭据并重新生成；仅删除当前文件内容不能消除历史泄露。
