@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm'
 import type { Permission } from '@/lib/permissions/folders'
 import { buildDocumentReplacementUrl } from '@/components/internal/pdf-reader/reader-state'
 import { createExportResourceManager } from '@/components/internal/pdf-reader/export-resources'
-import { mapReplacementOutcome } from '@/components/internal/pdf-reader/replacement-feedback'
+import { mapReplacementOutcome, type ReplacementOutcome } from '@/components/internal/pdf-reader/replacement-feedback'
 
 const PdfReader = dynamic(
   () => import('@/components/internal/pdf-reader/pdf-reader').then((module) => module.PdfReader),
@@ -188,8 +188,15 @@ export default function DocumentDetailPage() {
     }
   }
 
-  const handleReplacementFile = async (file: File | undefined) => {
-    if (!doc || !canEdit || !file) return
+  const handleReplacementFile = async (file: File | undefined): Promise<ReplacementOutcome> => {
+    if (!doc || !canEdit || !file) {
+      return {
+        status: 'request-error',
+        accepted: false,
+        clearFile: false,
+        message: '无法替换文件，请刷新页面后重试。',
+      }
+    }
     setReplacingFile(true)
     setRecoveryMessage('')
     setError('')
@@ -209,7 +216,7 @@ export default function DocumentDetailPage() {
           processingError: outcome.message,
         } : current)
         setError(outcome.message)
-        return
+        return outcome
       }
       const extension = file.name.split('.').pop()?.toLowerCase() || doc.fileType
       const status = outcome.status
@@ -217,6 +224,7 @@ export default function DocumentDetailPage() {
         fileType: extension,
         processingStatus: status,
         processingError: null,
+        updatedAt: new Date().toISOString(),
       }
       try {
         const refreshedResponse = await fetch(`/api/documents/${encodeURIComponent(doc.id)}`)
@@ -232,9 +240,11 @@ export default function DocumentDetailPage() {
         setReplacementFile(null)
         if (replacementInputRef.current) replacementInputRef.current.value = ''
       }
+      return outcome
     } catch (replacementError) {
       const outcome = mapReplacementOutcome({ kind: 'network', error: replacementError })
       setError(outcome.message)
+      return outcome
     } finally {
       setReplacingFile(false)
     }
@@ -350,9 +360,12 @@ export default function DocumentDetailPage() {
               />
             ) : (
               <ExcelReader
+                key={`${doc.id}-${doc.updatedAt}`}
                 documentId={doc.id}
                 title={doc.title}
                 permission={readerPermission}
+                fileType={doc.fileType as 'xls' | 'xlsx'}
+                onReplaceFile={handleReplacementFile}
               />
             )
           ) : doc.processingStatus === 'processing' || doc.processingStatus === 'pending' ? (

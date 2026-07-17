@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Download, Loader2, Search } from 'lucide-react'
+import { AlertCircle, Download, Loader2, Search, Upload } from 'lucide-react'
 
 import type { Permission } from '@/lib/permissions/folders'
 import {
   countSheetMatches,
+  EXCEL_PREVIEW_LIMITS,
   findDefaultSheetIndex,
   type WorkbookPreview,
   workbookToPreview,
@@ -13,16 +14,20 @@ import {
 
 import { createExportResourceManager } from './pdf-reader/export-resources'
 import { buildReaderFileUrl, getReaderActions } from './pdf-reader/reader-state'
+import type { ReplacementOutcome } from './pdf-reader/replacement-feedback'
+import { createRequestGuard, getSafeWorkbookDownloadName } from './excel-reader-state'
 
 interface ExcelReaderProps {
   documentId: string
   title: string
   permission: Permission
+  fileType: 'xls' | 'xlsx'
+  onReplaceFile?: (file: File) => Promise<ReplacementOutcome>
 }
 
 const FILE_ERROR = 'Excel 文件可能已损坏或格式不受支持，请联系文档管理员。'
 
-export function ExcelReader({ documentId, title, permission }: ExcelReaderProps) {
+export function ExcelReader({ documentId, title, permission, fileType, onReplaceFile }: ExcelReaderProps) {
   const [workbook, setWorkbook] = useState<WorkbookPreview | null>(null)
   const [activeSheetIndex, setActiveSheetIndex] = useState(0)
   const [query, setQuery] = useState('')
@@ -30,12 +35,24 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
   const [downloading, setDownloading] = useState(false)
+  const [replacing, setReplacing] = useState(false)
+  const [replacementFile, setReplacementFile] = useState<File | null>(null)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
   const mountedRef = useRef(true)
+  const replacementInputRef = useRef<HTMLInputElement>(null)
   const exportManagerRef = useRef<ReturnType<typeof createExportResourceManager> | null>(null)
   if (!exportManagerRef.current) exportManagerRef.current = createExportResourceManager()
 
   useEffect(() => {
     mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      exportManagerRef.current?.cleanup()
+    }
+  }, [])
+
+  useEffect(() => {
+    const requestGuard = createRequestGuard()
     const controller = new AbortController()
     setLoading(true)
     setLoadError('')
@@ -52,24 +69,23 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
       })
       .then((buffer) => workbookToPreview(buffer))
       .then((preview) => {
-        if (!mountedRef.current) return
+        if (!requestGuard.isActive()) return
         setWorkbook(preview)
         setActiveSheetIndex(findDefaultSheetIndex(preview))
       })
       .catch((error: unknown) => {
-        if (!mountedRef.current || (error instanceof DOMException && error.name === 'AbortError')) return
+        if (!requestGuard.isActive() || (error instanceof DOMException && error.name === 'AbortError')) return
         setLoadError(error instanceof Error && error.message !== 'Excel 文件可能已损坏或格式不受支持'
           ? error.message
           : FILE_ERROR)
       })
       .finally(() => {
-        if (mountedRef.current) setLoading(false)
+        if (requestGuard.isActive()) setLoading(false)
       })
 
     return () => {
-      mountedRef.current = false
+      requestGuard.cancel()
       controller.abort()
-      exportManagerRef.current?.cleanup()
     }
   }, [documentId])
 
@@ -97,7 +113,7 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
       manager.trackBlobUrl(blobUrl)
       const link = document.createElement('a')
       link.href = blobUrl
-      link.download = title
+      link.download = getSafeWorkbookDownloadName(title, fileType)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -112,6 +128,28 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
     }
   }
 
+  const replaceWorkbook = async (file: File) => {
+    if (!onReplaceFile) return
+    setReplacing(true)
+    setActionError('')
+    setRecoveryMessage('')
+    try {
+      const outcome = await onReplaceFile(file)
+      if (!mountedRef.current) return
+      if (outcome.accepted) {
+        setReplacementFile(null)
+        if (replacementInputRef.current) replacementInputRef.current.value = ''
+        setRecoveryMessage(outcome.message)
+      } else {
+        setActionError(outcome.message)
+      }
+    } catch {
+      if (mountedRef.current) setActionError('网络连接失败，请保留文件后重试。')
+    } finally {
+      if (mountedRef.current) setReplacing(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 text-center">
@@ -122,6 +160,7 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
   }
 
   if (loadError || !workbook) {
+    const canRecover = getReaderActions(permission).download
     return (
       <div className="flex min-h-[45vh] flex-col items-center justify-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 text-center">
         <AlertCircle className="size-7 text-amber-600" aria-hidden="true" />
@@ -129,6 +168,48 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
           {loadError || FILE_ERROR}
         </p>
         <p className="text-xs text-amber-700">请刷新页面重试；如果问题持续，请联系文档管理员。</p>
+        {canRecover && (
+          <div className="mt-2 flex flex-wrap justify-center gap-2">
+            {onReplaceFile && (
+              <>
+                <input
+                  ref={replacementInputRef}
+                  type="file"
+                  accept=".xls,.xlsx"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (!file) return
+                    setReplacementFile(file)
+                    void replaceWorkbook(file)
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => replacementFile
+                    ? void replaceWorkbook(replacementFile)
+                    : replacementInputRef.current?.click()}
+                  disabled={replacing}
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                >
+                  {replacing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                  {replacing ? '正在替换…' : replacementFile ? `重试：${replacementFile.name}` : '替换文件并重试'}
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => void downloadOriginal()}
+              disabled={downloading}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-amber-800 px-4 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-50"
+            >
+              {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {downloading ? '下载中…' : '下载原文件'}
+            </button>
+          </div>
+        )}
+        {recoveryMessage && <p role="status" className="text-xs text-emerald-700">{recoveryMessage}</p>}
+        {actionError && <p role="alert" className="text-xs text-red-700">{actionError}</p>}
       </div>
     )
   }
@@ -195,7 +276,23 @@ export function ExcelReader({ documentId, title, permission }: ExcelReaderProps)
 
       {activeSheet?.truncated && (
         <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-          当前显示前 1,000 行，共 {activeSheet.originalRowCount.toLocaleString('zh-CN')} 行。
+          当前显示前 {EXCEL_PREVIEW_LIMITS.maxRows.toLocaleString('zh-CN')} 行，共 {activeSheet.originalRowCount.toLocaleString('zh-CN')} 行。
+        </p>
+      )}
+      {activeSheet?.columnsTruncated && (
+        <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          当前 Sheet 共有 {activeSheet.originalColumnCount.toLocaleString('zh-CN')} 列，为保障性能仅显示前 {EXCEL_PREVIEW_LIMITS.maxColumns} 列。
+        </p>
+      )}
+      {workbook.sheetsTruncated && (
+        <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          工作簿共有 {workbook.originalSheetCount.toLocaleString('zh-CN')} 个 Sheet，为保障性能仅显示前 {EXCEL_PREVIEW_LIMITS.maxSheets} 个。
+        </p>
+      )}
+      {workbook.totalCellsTruncated && (
+        <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          当前工作簿预览已达到 {EXCEL_PREVIEW_LIMITS.maxTotalCells.toLocaleString('zh-CN')} 个单元格上限，后续内容未显示；
+          {canDownload ? '可下载原文件完整查看。' : '如需完整内容，请联系文档管理员。'}
         </p>
       )}
 

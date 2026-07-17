@@ -4,13 +4,27 @@ export interface SheetPreview {
   name: string
   rows: string[][]
   originalRowCount: number
+  originalColumnCount: number
   truncated: boolean
+  columnsTruncated: boolean
+  totalLimitTruncated: boolean
 }
 
 export interface WorkbookPreview {
   sheetNames: string[]
   sheets: SheetPreview[]
+  originalSheetCount: number
+  sheetsTruncated: boolean
+  renderedCellCount: number
+  totalCellsTruncated: boolean
 }
+
+export const EXCEL_PREVIEW_LIMITS = {
+  maxRows: 1000,
+  maxColumns: 100,
+  maxSheets: 20,
+  maxTotalCells: 100_000,
+} as const
 
 export function findDefaultSheetIndex(workbook: WorkbookPreview): number {
   const firstNonEmpty = workbook.sheets.findIndex((sheet) => sheet.rows.length > 0)
@@ -50,14 +64,44 @@ function isExcelContainer(data: Uint8Array): boolean {
 function toDisplayRows(
   worksheet: XLSX.WorkSheet,
   maxRows: number,
-): { rows: string[][]; originalRowCount: number; truncated: boolean } {
-  if (!worksheet['!ref']) return { rows: [], originalRowCount: 0, truncated: false }
+  remainingCells: number,
+): Omit<SheetPreview, 'name'> {
+  if (!worksheet['!ref']) {
+    return {
+      rows: [],
+      originalRowCount: 0,
+      originalColumnCount: 0,
+      truncated: false,
+      columnsTruncated: false,
+      totalLimitTruncated: false,
+    }
+  }
 
   const sourceRange = XLSX.utils.decode_range(worksheet['!ref'])
   const originalRowCount = sourceRange.e.r - sourceRange.s.r + 1
+  const originalColumnCount = sourceRange.e.c - sourceRange.s.c + 1
+  const previewColumnCount = Math.min(originalColumnCount, EXCEL_PREVIEW_LIMITS.maxColumns)
+  const rowLimitBeforeTotal = Math.min(originalRowCount, maxRows)
+  const previewRowCount = Math.min(
+    rowLimitBeforeTotal,
+    previewColumnCount > 0 ? Math.floor(remainingCells / previewColumnCount) : 0,
+  )
+  if (previewRowCount === 0) {
+    return {
+      rows: [],
+      originalRowCount,
+      originalColumnCount,
+      truncated: originalRowCount > maxRows,
+      columnsTruncated: originalColumnCount > previewColumnCount,
+      totalLimitTruncated: rowLimitBeforeTotal > 0,
+    }
+  }
   const previewRange = {
     s: sourceRange.s,
-    e: { ...sourceRange.e, r: Math.min(sourceRange.e.r, sourceRange.s.r + maxRows - 1) },
+    e: {
+      r: sourceRange.s.r + previewRowCount - 1,
+      c: sourceRange.s.c + previewColumnCount - 1,
+    },
   }
   const rawRows = XLSX.utils.sheet_to_json<Array<string | number | boolean | Date>>(
     worksheet,
@@ -70,13 +114,19 @@ function toDisplayRows(
       range: previewRange,
     },
   )
-  const columnCount = sourceRange.e.c - sourceRange.s.c + 1
   const rows = rawRows.map((row) => Array.from(
-    { length: columnCount },
+    { length: previewColumnCount },
     (_, columnIndex) => toDisplayString(row[columnIndex]),
   ))
 
-  return { rows, originalRowCount, truncated: originalRowCount > maxRows }
+  return {
+    rows,
+    originalRowCount,
+    originalColumnCount,
+    truncated: originalRowCount > maxRows,
+    columnsTruncated: originalColumnCount > previewColumnCount,
+    totalLimitTruncated: previewRowCount < rowLimitBeforeTotal,
+  }
 }
 
 function toDisplayString(value: string | number | boolean | Date | undefined): string {
@@ -93,10 +143,11 @@ function toDisplayString(value: string | number | boolean | Date | undefined): s
 
 export function workbookToPreview(
   input: ArrayBuffer | Uint8Array,
-  maxRows = 1000,
+  requestedMaxRows: number = EXCEL_PREVIEW_LIMITS.maxRows,
 ): WorkbookPreview {
   try {
-    if (!Number.isSafeInteger(maxRows) || maxRows <= 0) throw new Error(CORRUPT_FILE_MESSAGE)
+    if (!Number.isSafeInteger(requestedMaxRows) || requestedMaxRows <= 0) throw new Error(CORRUPT_FILE_MESSAGE)
+    const maxRows = Math.min(requestedMaxRows, EXCEL_PREVIEW_LIMITS.maxRows)
     const data = input instanceof Uint8Array ? input : new Uint8Array(input)
     if (!isExcelContainer(data)) throw new Error(CORRUPT_FILE_MESSAGE)
 
@@ -111,12 +162,28 @@ export function workbookToPreview(
     })
     if (workbook.SheetNames.length === 0) throw new Error(CORRUPT_FILE_MESSAGE)
 
-    return {
-      sheetNames: [...workbook.SheetNames],
-      sheets: workbook.SheetNames.map((name) => ({
+    const selectedSheetNames = workbook.SheetNames.slice(0, EXCEL_PREVIEW_LIMITS.maxSheets)
+    let remainingCells = EXCEL_PREVIEW_LIMITS.maxTotalCells
+    const sheets = selectedSheetNames.map((name) => {
+      const sheet = {
         name,
-        ...toDisplayRows(workbook.Sheets[name] ?? {}, maxRows),
-      })),
+        ...toDisplayRows(workbook.Sheets[name] ?? {}, maxRows, remainingCells),
+      }
+      remainingCells -= sheet.rows.length * Math.min(
+        sheet.originalColumnCount,
+        EXCEL_PREVIEW_LIMITS.maxColumns,
+      )
+      return sheet
+    })
+    const renderedCellCount = EXCEL_PREVIEW_LIMITS.maxTotalCells - remainingCells
+
+    return {
+      sheetNames: [...selectedSheetNames],
+      sheets,
+      originalSheetCount: workbook.SheetNames.length,
+      sheetsTruncated: selectedSheetNames.length < workbook.SheetNames.length,
+      renderedCellCount,
+      totalCellsTruncated: sheets.some((sheet) => sheet.totalLimitTruncated),
     }
   } catch {
     throw new Error(CORRUPT_FILE_MESSAGE)
