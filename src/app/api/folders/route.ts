@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { getUserAccessibleFolderIds } from '@/lib/permissions/folders'
-import { statSync, readdirSync } from 'fs'
-import { join } from 'path'
 import { getFolderPermission } from '@/lib/permissions/folders'
+import { calculateDocumentStorage } from '@/lib/document-processor'
 
 // GET /api/folders — list folder tree (filtered by user permissions)
 export async function GET(req: NextRequest) {
@@ -11,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Calculate actual storage usage from disk
-  const storage = calcStorageUsage()
+  const storage = await calculateDocumentStorage()
 
   // Super admin sees everything — all folders get admin permission
   if (session.role === 'super_admin') {
@@ -46,20 +45,6 @@ export async function GET(req: NextRequest) {
   }))
 
   return NextResponse.json({ folders, storage })
-}
-
-// ── Calculate actual storage usage from uploads directory ──
-function calcStorageUsage() {
-  try {
-    const uploadsDir = join(process.cwd(), 'public', 'uploads', 'documents')
-    let totalBytes = 0
-    const docDirs = readdirSync(uploadsDir, { withFileTypes: true })
-    for (const dir of docDirs) {
-      if (!dir.isDirectory()) continue
-      try { totalBytes += statSync(join(uploadsDir, dir.name, 'original.docx')).size } catch {}
-    }
-    return { usedBytes: totalBytes, usedGB: +(totalBytes / 1e9).toFixed(1), totalGB: 100, percent: Math.min(99, Math.round((totalBytes / 1e11) * 100)) }
-  } catch { return { usedBytes: 0, usedGB: 0, totalGB: 100, percent: 0 } }
 }
 
 // POST /api/folders — create folder

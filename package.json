@@ -8,6 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit --pretty false",
     "test:document-files": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/document-files.test.ts",
+    "test:document-processor": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/document-processor.test.ts",
     "test:file-access": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/document-file-access.test.ts",
     "test:session": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/session.test.ts",
     "test:policy-access": "TS_NODE_COMPILER_OPTIONS='{\"module\":\"CommonJS\",\"moduleResolution\":\"Node\"}' node --test -r ts-node/register src/lib/__tests__/policy-access.test.ts",

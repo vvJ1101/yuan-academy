@@ -37,6 +37,11 @@ export function logEdit(userId: string, documentId: string) {
   return logDocumentAccess(userId, documentId, 'edit')
 }
 
+/** Log a document upload. */
+export function logUpload(userId: string, documentId: string) {
+  return logDocumentAccess(userId, documentId, 'upload')
+}
+
 /** Log a document deletion */
 export function logDelete(userId: string, documentId: string) {
   return logDocumentAccess(userId, documentId, 'delete')
