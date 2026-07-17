@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  buildReaderFileUrl,
   clampPage,
+  getReaderActions,
   initialReaderState,
   nextScale,
+  renderHighlightedText,
   readerReducer,
 } from './reader-state'
 
@@ -73,4 +76,54 @@ test('empty search results keep a sentinel index', () => {
   assert.equal(state.searchResultCount, 0)
   assert.equal(state.searchResultIndex, -1)
   assert.equal(readerReducer(state, { type: 'nextSearchResult' }).searchResultIndex, -1)
+})
+
+test('document load records total pages and clamps the current page', () => {
+  const state = readerReducer(
+    { ...initialReaderState, page: 9 },
+    { type: 'documentLoaded', numPages: 4 },
+  )
+
+  assert.equal(state.numPages, 4)
+  assert.equal(state.page, 4)
+})
+
+test('search count transition selects the first result', () => {
+  const state = readerReducer(initialReaderState, {
+    type: 'setSearchResultCount',
+    count: 2,
+  })
+
+  assert.equal(state.searchResultCount, 2)
+  assert.equal(state.searchResultIndex, 0)
+})
+
+test('reader actions hide download and print from view permission', () => {
+  assert.deepEqual(getReaderActions('view'), { download: false, print: false })
+  assert.deepEqual(getReaderActions('edit'), { download: true, print: true })
+  assert.deepEqual(getReaderActions('delete'), { download: true, print: true })
+  assert.deepEqual(getReaderActions('admin'), { download: true, print: true })
+})
+
+test('protected reader URLs use the same-origin document file endpoint', () => {
+  assert.equal(
+    buildReaderFileUrl('doc_123', 'preview'),
+    '/api/documents/doc_123/file?variant=preview&disposition=inline',
+  )
+  assert.equal(
+    buildReaderFileUrl('doc_123', 'download'),
+    '/api/documents/doc_123/file?variant=original&disposition=attachment',
+  )
+  assert.equal(
+    buildReaderFileUrl('doc_123', 'print'),
+    '/api/documents/doc_123/file?variant=preview&disposition=inline&purpose=print',
+  )
+})
+
+test('search highlighting escapes PDF text and the query before adding marks', () => {
+  assert.equal(
+    renderHighlightedText('<script>安全</script> 安全', '安全'),
+    '&lt;script&gt;<mark>安全</mark>&lt;/script&gt; <mark>安全</mark>',
+  )
+  assert.equal(renderHighlightedText('预算 (Q1)', '(Q1)'), '预算 <mark>(Q1)</mark>')
 })
