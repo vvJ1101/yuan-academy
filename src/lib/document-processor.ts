@@ -33,6 +33,8 @@ interface ProcessorDependencies {
   ) => Promise<ConversionResult>
   afterOriginalStored?: () => Promise<void>
   deferReady?: boolean
+  replacement?: boolean
+  renameFile?: (source: string, destination: string) => Promise<void>
 }
 
 interface ProcessInput {
@@ -93,29 +95,65 @@ export async function processDocumentFile(
   const docDir = join(root, input.documentId)
   const originalPath = join(docDir, `original.${input.upload.fileType}`)
   const stagingPath = join(docDir, `.original-${randomUUID()}.staging`)
+  const backupPath = join(docDir, `.original-${randomUUID()}.backup`)
+  const renameFile = dependencies.renameFile ?? rename
   const updateMetadata = dependencies.updateMetadata
     ?? ((changes: MetadataChanges) => defaultMetadataUpdater(input.documentId, changes))
 
+  let hasBackup = false
+  const restoreBackup = async () => {
+    if (!hasBackup) return
+    await rm(originalPath, { force: true }).catch(() => undefined)
+    try {
+      await renameFile(backupPath, originalPath)
+      hasBackup = false
+    } catch {
+      throw new Error('原文件自动恢复失败，安全备份已保留')
+    }
+  }
   try {
     await mkdir(docDir, { recursive: true })
     await writeFile(stagingPath, input.buffer)
-    await rename(stagingPath, originalPath)
+    if (dependencies.replacement) {
+      try {
+        await stat(originalPath)
+        await renameFile(originalPath, backupPath)
+        hasBackup = true
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+    await renameFile(stagingPath, originalPath)
   } catch (error) {
     await rm(stagingPath, { force: true }).catch(() => undefined)
+    if (hasBackup) await restoreBackup()
     const processingError = '原文件保存失败，请重试'
-    await updateMetadata({ processingStatus: 'failed', processingError, previewPath: null })
+    if (!dependencies.replacement) {
+      await updateMetadata({ processingStatus: 'failed', processingError, previewPath: null })
+    }
     return { status: 'failed', hasPreview: false, originalStored: false, error: processingError }
   }
 
-  await updateMetadata({
-    originalFileName: input.upload.originalFileName,
-    fileType: input.upload.fileType,
-    mimeType: input.upload.mimeType,
-    fileSize: input.buffer.byteLength,
-    processingStatus: 'processing',
-    processingError: null,
-    previewPath: null,
-  })
+  try {
+    await updateMetadata({
+      originalFileName: input.upload.originalFileName,
+      fileType: input.upload.fileType,
+      mimeType: input.upload.mimeType,
+      fileSize: input.buffer.byteLength,
+      processingStatus: 'processing',
+      processingError: null,
+      previewPath: null,
+    })
+  } catch {
+    if (dependencies.replacement) {
+      await rm(originalPath, { force: true }).catch(() => undefined)
+      if (hasBackup) await restoreBackup()
+      await rm(stagingPath, { force: true }).catch(() => undefined)
+      throw new Error('文档元数据更新失败，已恢复原文件')
+    }
+    throw new Error('文档元数据更新失败')
+  }
+  if (hasBackup) await rm(backupPath, { force: true }).catch(() => undefined)
 
   try {
     await dependencies.afterOriginalStored?.()

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -157,4 +157,43 @@ test('replacement finalization marks failed when parsing or final update fails',
     }))
     assert.equal(failed, true)
   }
+})
+
+test('replacement restores old original and preview when first metadata transition fails', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const dir = join(root, 'rollback'); await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'original.pdf'), 'old-original')
+  await writeFile(join(dir, 'preview.pdf'), 'old-preview')
+  let metadataCalls = 0
+  await assert.rejects(processDocumentFile({ documentId: 'rollback', buffer: Buffer.from('new-original'), upload: upload('pdf') }, {
+    root,
+    replacement: true,
+    updateMetadata: async () => { metadataCalls += 1; throw new Error('database unavailable') },
+  }))
+  assert.equal(metadataCalls, 1)
+  assert.equal((await readFile(join(dir, 'original.pdf'))).toString(), 'old-original')
+  assert.equal((await readFile(join(dir, 'preview.pdf'))).toString(), 'old-preview')
+  assert.deepEqual((await readdir(dir)).filter(file => file.includes('.backup') || file.includes('.staging')), [])
+})
+
+test('replacement write or rename failure preserves old ready files and does not update metadata', async (t) => {
+  const root = await tempRoot(); t.after(() => rm(root, { recursive: true, force: true }))
+  const dir = join(root, 'swap-fail'); await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, 'original.pdf'), 'old-original')
+  await writeFile(join(dir, 'preview.pdf'), 'old-preview')
+  let metadataCalls = 0
+  const result = await processDocumentFile({ documentId: 'swap-fail', buffer: Buffer.from('new-original'), upload: upload('pdf') }, {
+    root,
+    replacement: true,
+    renameFile: async (source, destination) => {
+      if (source.endsWith('.staging')) throw new Error('rename failed')
+      await rename(source, destination)
+    },
+    updateMetadata: async () => { metadataCalls += 1 },
+  })
+  assert.equal(result.originalStored, false)
+  assert.equal(metadataCalls, 0)
+  assert.equal((await readFile(join(dir, 'original.pdf'))).toString(), 'old-original')
+  assert.equal((await readFile(join(dir, 'preview.pdf'))).toString(), 'old-preview')
+  assert.deepEqual((await readdir(dir)).filter(file => file.includes('.backup') || file.includes('.staging')), [])
 })

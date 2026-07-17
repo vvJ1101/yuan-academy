@@ -56,6 +56,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   try {
     const processed = await processDocumentFile({ documentId: doc.id, buffer, upload }, {
       deferReady: true,
+      replacement: true,
       afterOriginalStored: async () => {
         await rm(getPreviewFilePath(doc.id), { force: true })
         if (doc.fileType && doc.fileType !== upload.fileType) {
@@ -97,6 +98,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await logEdit(session.id, doc.id)
     return NextResponse.json({ ok: true, processing: processed, parseStats: finalized.parseStats })
   } catch {
-    return NextResponse.json({ error: '替换后续处理失败，新原文件已保存并标记为失败' }, { status: 500 })
+    return NextResponse.json({ error: '替换处理失败，系统已保留或恢复可用的原文件状态' }, { status: 500 })
   }
 }
