@@ -6,6 +6,7 @@ import { existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { sanitizeMarkdown } from '@/lib/sanitize'
 import { logEdit } from '@/lib/audit'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params
@@ -45,8 +46,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const guard = await requirePermission(session, 'document.edit', '你没有编辑文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const doc = await prisma.document.findUnique({
     where: { id: routeParams.id },
@@ -56,8 +58,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Use full permission engine (folder inherit + doc override + legacy + policy check)
   let userPerm: string | null = null
-  try { userPerm = await getDocumentPermission(session, routeParams.id) } catch {}
-  if (!canEditDocument(session, doc.ownerDeptId, undefined, doc.category) && !(userPerm && ['edit', 'delete', 'admin'].includes(userPerm))) {
+  try { userPerm = await getDocumentPermission(activeSession, routeParams.id) } catch {}
+  if (!canEditDocument(activeSession, doc.ownerDeptId, undefined, doc.category) && !(userPerm && ['edit', 'delete', 'admin'].includes(userPerm))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -109,15 +111,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       data: {
         documentId: routeParams.id,
         content: (typeof content === 'string' ? content.substring(0, 100000) : doc.fullContent) || '',
-        editorId: session.id,
-        editorName: session.name || session.departmentName || 'Unknown',
+        editorId: activeSession.id,
+        editorName: activeSession.name || activeSession.departmentName || 'Unknown',
         remark: remark || null,
       },
     }).catch((err: Error) => console.error('[DocumentHistory] Failed to create:', err.message))
   }
 
   // ── Audit log ──
-  logEdit(session.id, routeParams.id)
+  logEdit(activeSession.id, routeParams.id)
 
   return NextResponse.json(updated)
 }
@@ -126,8 +128,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const routeParams = await params
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const guard = await requirePermission(session, 'document.delete', '你没有删除文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const doc = await prisma.document.findUnique({
     where: { id: routeParams.id },
@@ -137,8 +140,8 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   // Use full permission engine (folder inherit + doc override + legacy + policy check)
   let userPermDel: string | null = null
-  try { userPermDel = await getDocumentPermission(session, routeParams.id) } catch {}
-  if (!canDeleteDocument(session, doc.ownerDeptId, undefined, doc.category) && !(userPermDel && ['delete', 'admin'].includes(userPermDel))) {
+  try { userPermDel = await getDocumentPermission(activeSession, routeParams.id) } catch {}
+  if (!canDeleteDocument(activeSession, doc.ownerDeptId, undefined, doc.category) && !(userPermDel && ['delete', 'admin'].includes(userPermDel))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { ocrDocumentImages } from '@/lib/ocr'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin' && session.role !== 'dept_admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await requirePermission(session, 'document.ocr', '你没有 OCR 识别文档的权限')
+  if (!guard.ok) return guard.response
 
   const doc = await prisma.document.findUnique({
     where: { id: (await params).id },

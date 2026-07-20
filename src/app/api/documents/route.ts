@@ -7,6 +7,7 @@ import { logUpload } from '@/lib/audit'
 import { buildDocumentWhere, canUploadToFolder } from '@/lib/permissions/documents'
 import { getFolderPermission, getFolderPermissionsForDocuments } from '@/lib/permissions/folders'
 import { resolveDocumentPermission } from '@/lib/permissions/document-resolution'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
@@ -64,7 +65,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: '请先登录' }, { status: 401 })
+  const guard = await requirePermission(session, 'document.upload', '你没有上传文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   let formData: FormData
   try { formData = await req.formData() } catch {
@@ -78,8 +81,8 @@ export async function POST(req: NextRequest) {
   if (folderId && !await prisma.folder.findUnique({ where: { id: folderId }, select: { id: true } })) {
     return NextResponse.json({ error: '目标文件夹不存在' }, { status: 404 })
   }
-  const folderPermission = folderId ? await getFolderPermission(session, folderId) : null
-  if (!canUploadToFolder(session, folderPermission)) {
+  const folderPermission = folderId ? await getFolderPermission(activeSession, folderId) : null
+  if (!canUploadToFolder(activeSession, folderPermission)) {
     return NextResponse.json({ error: '你没有向该文件夹上传的权限' }, { status: 403 })
   }
 
@@ -98,8 +101,8 @@ export async function POST(req: NextRequest) {
         slug: title.replace(/[/\\?%*:|"<>]/g, '-').substring(0, 200),
         fullContent: '',
         category: String(formData.get('category') || 'reference'),
-        ownerDeptId: String(formData.get('departmentId') || session.departmentId || '') || undefined,
-        authorId: session.id,
+        ownerDeptId: String(formData.get('departmentId') || activeSession.departmentId || '') || undefined,
+        authorId: activeSession.id,
         visibility: 'department',
         folderId,
         originalFileName: upload.originalFileName,
@@ -116,7 +119,7 @@ export async function POST(req: NextRequest) {
       await prisma.document.delete({ where: { id: doc.id } })
       return NextResponse.json({ error: '原文件保存失败，未创建文档' }, { status: 500 })
     }
-    await logUpload(session.id, doc.id)
+    await logUpload(activeSession.id, doc.id)
 
     let fullContent = `> 该文档为 ${upload.fileType.toUpperCase()} 文件，请使用在线阅读器查看。`
     let displayMode = upload.fileType === 'pdf' || upload.fileType === 'ppt' || upload.fileType === 'pptx' ? 'pdf' : 'full'

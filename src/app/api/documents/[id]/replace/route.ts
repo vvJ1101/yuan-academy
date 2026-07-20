@@ -6,10 +6,13 @@ import { createDocumentHistorySnapshot, finalizeDocumentReplacement, getDocument
 import { getOriginalFilePath, getPreviewFilePath, validateUploadFile } from '@/lib/document-files'
 import { canEdit } from '@/lib/permissions/documents'
 import { getDocumentPermission } from '@/lib/permissions/folders'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: '请先登录' }, { status: 401 })
+  const guard = await requirePermission(session, 'document.replace', '你没有替换文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const doc = await prisma.document.findUnique({
     where: { id: (await params).id },
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     },
   })
   if (!doc) return NextResponse.json({ error: '文档不存在' }, { status: 404 })
-  if (!canEdit(await getDocumentPermission(session, doc.id))) {
+  if (!canEdit(await getDocumentPermission(activeSession, doc.id))) {
     return NextResponse.json({ error: '你没有编辑该文档的权限' }, { status: 403 })
   }
 
@@ -44,8 +47,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           title: doc.title, content: doc.content, fullContent: doc.fullContent,
           condensedContent: doc.condensedContent, displayMode: doc.displayMode,
         }),
-        editorId: session.id,
-        editorName: session.name || session.departmentName || '未知用户',
+        editorId: activeSession.id,
+        editorName: activeSession.name || activeSession.departmentName || '未知用户',
         remark: '替换原始文件前自动备份',
       },
     })
@@ -95,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         })
       },
     })
-    await logEdit(session.id, doc.id)
+    await logEdit(activeSession.id, doc.id)
     return NextResponse.json({ ok: true, processing: processed, parseStats: finalized.parseStats })
   } catch (error) {
     const operationalMessage = getDocumentProcessorErrorMessage(error)
