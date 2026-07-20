@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Table, Button, Input, Space, Modal, Form, Tree, Radio, Tag, message,
-  Popconfirm, Card, Breadcrumb, Select, Checkbox
+  Popconfirm, Card, Breadcrumb, Select, Checkbox, Tabs, Alert, Divider
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
 import {
   PlusOutlined, SearchOutlined, ReloadOutlined, EditOutlined, DeleteOutlined,
-  SafetyOutlined, TeamOutlined, LockOutlined
+  SafetyOutlined
 } from '@ant-design/icons'
 import { roleApi } from '@/api/role'
 import { permissionApi } from '@/api/permission'
@@ -88,6 +88,13 @@ function getAllKeys(nodes: DataNode[]): string[] {
   const [addUserOpen, setAddUserOpen] = useState(false)
   const [allUsers, setAllUsers] = useState<UserVO[]>([])
   const [selectedNewUsers, setSelectedNewUsers] = useState<string[]>([])
+
+  // Unified role configuration modal
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configRole, setConfigRole] = useState<RoleVO | null>(null)
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configSaving, setConfigSaving] = useState(false)
+  const [configTab, setConfigTab] = useState('permissions')
 
   // ── Group allUsers by department ──
   const groupedUsers = useMemo(() => {
@@ -195,6 +202,62 @@ function getAllKeys(nodes: DataNode[]): string[] {
     setPermSaving(false); setPermOpen(false)
   }
 
+  const openConfigModal = async (r: RoleVO) => {
+    setConfigRole(r)
+    setPermRoleId(r.id)
+    setScopeRoleId(r.id)
+    setUsersRoleId(r.id)
+    setUsersRoleName(r.name)
+    setConfigTab('permissions')
+    setConfigOpen(true)
+    setPermExpandAll(true)
+    setConfigLoading(true)
+    try {
+      const [treeRes, permRes, deptRes, scopeRes]: any[] = await Promise.all([
+        permissionApi.getTree(),
+        roleApi.getPermissions(r.id),
+        deptApi.getTree(),
+        fetch(`/api/admin/roles/${r.id}/dataScope`).then(res => res.json()),
+      ])
+      if (treeRes.code === 0) setPermTree(toTreeNodes(treeRes.data))
+      if (permRes.code === 0) setPermChecked(permRes.data)
+      if (deptRes.code === 0) setDeptTree(toTreeNodes(deptRes.data))
+      if (scopeRes.code === 0) {
+        setScopeValue(scopeRes.data?.dataScope || r.dataScope || 'SELF_AND_CHILDREN')
+        setScopeDeptIds(Array.isArray(scopeRes.data?.customDeptIds) ? scopeRes.data.customDeptIds : [])
+      } else {
+        setScopeValue(r.dataScope || 'SELF_AND_CHILDREN')
+        setScopeDeptIds([])
+      }
+      await loadRoleUsers(r.id, 1)
+    } catch {
+      message.error('加载角色权限配置失败')
+    }
+    setConfigLoading(false)
+  }
+
+  const handleSaveConfig = async () => {
+    if (!configRole) return
+    if (scopeValue === 'ALL' && !window.confirm('该角色将拥有授权模块下的全部数据范围，确定保存？')) return
+    setConfigSaving(true)
+    try {
+      const [permRes, scopeRes]: any[] = await Promise.all([
+        roleApi.assignPermissions(configRole.id, permChecked),
+        roleApi.updateDataScope(configRole.id, scopeValue as DataScopeType, scopeValue === 'CUSTOM' ? scopeDeptIds : undefined),
+      ])
+      if (permRes.code === 0 && scopeRes.code === 0) {
+        message.success('权限配置已保存，用户刷新页面后立即生效')
+        setConfigOpen(false)
+        await loadRoles(pagination.current, searchText)
+      } else {
+        message.error(permRes.message || scopeRes.message || '保存失败')
+      }
+    } catch {
+      message.error('保存失败')
+    }
+    setConfigSaving(false)
+  }
+
   // ── Data scope ──
   const openScopeModal = async (r: RoleVO) => {
     setScopeRoleId(r.id); setScopeValue(r.dataScope); setScopeOpen(true)
@@ -254,15 +317,13 @@ function getAllKeys(nodes: DataNode[]): string[] {
     { title: '数据权限', dataIndex: 'dataScope', width: 120, render: (v: string) => DATA_SCOPE_LABELS[v] || v },
     { title: '创建时间', dataIndex: 'createTime', width: 180 },
     {
-      title: '操作', width: 420, fixed: 'right' as const, render: (_, r) => (
+      title: '操作', width: 300, fixed: 'right' as const, render: (_, r) => (
         <Space size={0} wrap>
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openEditForm(r)} style={{ color: '#1890ff' }}>编辑</Button>
           <Popconfirm title={`确定要删除「${r.name}」？`} onConfirm={() => handleDelete(r)} okText="确定" cancelText="取消">
             <Button type="link" size="small" icon={<DeleteOutlined />} danger>删除</Button>
           </Popconfirm>
-          <Button type="link" size="small" icon={<SafetyOutlined />} onClick={() => openPermModal(r)} style={{ color: '#fa8c16' }}>分配权限</Button>
-          <Button type="link" size="small" icon={<LockOutlined />} onClick={() => openScopeModal(r)} style={{ color: '#52c41a' }}>数据权限</Button>
-          <Button type="link" size="small" icon={<TeamOutlined />} onClick={() => openUsersModal(r)} style={{ color: '#722ed1' }}>选择用户</Button>
+          <Button type="link" size="small" icon={<SafetyOutlined />} onClick={() => openConfigModal(r)} style={{ color: '#2563eb' }}>配置权限</Button>
         </Space>
       )
     },
@@ -339,6 +400,139 @@ function getAllKeys(nodes: DataNode[]): string[] {
             setPermChecked(rawKeys.map(String))
           }} treeData={permTree}
           style={{ maxHeight: 400, overflow: 'auto' }} />
+      </Modal>
+
+      {/* ── Unified Permission Configuration Modal ── */}
+      <Modal title={configRole ? `权限配置 - ${configRole.name}` : '权限配置'} open={configOpen} onCancel={() => setConfigOpen(false)}
+        onOk={handleSaveConfig} confirmLoading={configSaving} width={920} destroyOnClose okText="保存权限配置">
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="权限由三部分共同决定"
+          description="菜单权限决定能不能看到入口，按钮权限决定能不能执行操作，数据权限决定这些操作能作用到哪些数据。后端 API 会再次校验，不只依赖前端隐藏按钮。"
+        />
+        <Tabs activeKey={configTab} onChange={setConfigTab} items={[
+          {
+            key: 'permissions',
+            label: '1. 菜单与按钮权限',
+            children: (
+              <div>
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="建议先勾页面入口，再勾对应按钮"
+                  description="例如：要允许删除用户，应同时拥有“用户管理”页面入口和“删除用户”按钮权限；后续会继续增加依赖自动补全。"
+                />
+                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <Space>
+                    <Button size="small" onClick={() => setPermExpandAll(!permExpandAll)}>
+                      {permExpandAll ? '收起全部' : '展开全部'}
+                    </Button>
+                    <Button size="small" onClick={() => {
+                      const allKeys = getAllKeys(permTree)
+                      setPermChecked(permChecked.length === allKeys.length ? [] : allKeys)
+                    }}>{permChecked.length === getAllKeys(permTree).length ? '取消全选' : '全选'}</Button>
+                  </Space>
+                  <span style={{ fontSize: 12, color: '#666' }}>已选择 {permChecked.length} 个权限节点</span>
+                </div>
+                <Tree key={permExpandAll ? 'config-e' : 'config-c'} checkable checkStrictly defaultExpandAll={permExpandAll}
+                  checkedKeys={permChecked}
+                  onCheck={(keys) => {
+                    const rawKeys = Array.isArray(keys) ? keys : keys.checked
+                    setPermChecked(rawKeys.map(String))
+                  }}
+                  treeData={permTree}
+                  style={{ maxHeight: 440, overflow: 'auto', padding: 12, border: '1px solid #f0f0f0', borderRadius: 8 }}
+                />
+              </div>
+            ),
+          },
+          {
+            key: 'scope',
+            label: '2. 数据权限',
+            children: (
+              <div>
+                <Alert
+                  type={scopeValue === 'ALL' ? 'warning' : 'info'}
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message={scopeValue === 'ALL' ? '当前选择了全部数据范围' : '数据权限控制可见和可操作的数据边界'}
+                  description="按钮权限只代表能执行动作；数据权限决定能对哪些公司、部门或文件夹的数据执行动作。"
+                />
+                <Radio.Group value={scopeValue} onChange={(event) => setScopeValue(event.target.value)} style={{ marginBottom: 16 }}>
+                  <Space wrap>
+                    <Radio.Button value="ALL">全部数据</Radio.Button>
+                    <Radio.Button value="SELF_AND_CHILDREN">本级及下级</Radio.Button>
+                    <Radio.Button value="SELF">仅本级</Radio.Button>
+                    <Radio.Button value="PERSONAL">仅本人</Radio.Button>
+                    <Radio.Button value="CUSTOM">自定义部门</Radio.Button>
+                  </Space>
+                </Radio.Group>
+                {scopeValue === 'CUSTOM' && (
+                  <>
+                    <Divider plain>自定义可见部门</Divider>
+                    <div style={{ marginBottom: 12 }}>
+                      <Button size="small" onClick={() => {
+                        const allKeys = getAllKeys(deptTree)
+                        setScopeDeptIds(scopeDeptIds.length === allKeys.length ? [] : allKeys)
+                      }}>{scopeDeptIds.length === (deptTree.length ? getAllKeys(deptTree).length : 0) ? '取消全选' : '全选'}</Button>
+                      <span style={{ marginLeft: 8, fontSize: 12, color: '#666' }}>已选择 {scopeDeptIds.length} 个部门节点</span>
+                    </div>
+                    <Tree checkable defaultExpandAll checkedKeys={scopeDeptIds}
+                      onCheck={(keys) => {
+                        const rawKeys = Array.isArray(keys) ? keys : (keys as any).checked
+                        setScopeDeptIds(rawKeys.map(String))
+                      }}
+                      treeData={deptTree}
+                      style={{ maxHeight: 360, overflow: 'auto', padding: 12, border: '1px solid #f0f0f0', borderRadius: 8 }}
+                    />
+                  </>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: 'users',
+            label: '3. 成员用户',
+            children: (
+              <div>
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="成员用户会继承该角色的菜单、按钮和数据权限"
+                  description="一个用户可以属于多个角色，最终权限按并集生效；危险权限建议尽量给专门角色。"
+                />
+                <div style={{ marginBottom: 12, textAlign: 'right' }}>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={async () => {
+                    setAddUserOpen(true); setSelectedNewUsers([])
+                    try {
+                      const res: any = await fetch('/api/users').then(r => r.json())
+                      const all: UserVO[] = Array.isArray(res) ? res : (res.users || res.data || [])
+                      setAllUsers(all.filter((u: any) => !roleUsers.some(ru => ru.id === u.id)))
+                    } catch {}
+                  }}>添加用户</Button>
+                </div>
+                <Table rowKey="id" loading={usersLoading} dataSource={roleUsers}
+                  columns={[
+                    { title: '姓名', dataIndex: 'name', width: 100 },
+                    { title: '账号', dataIndex: 'email', width: 220 },
+                    { title: '部门', dataIndex: 'department', width: 120 },
+                    { title: '添加时间', dataIndex: 'addedAt', width: 160 },
+                    { title: '操作', width: 80, render: (_, u: any) => (
+                      <Popconfirm title="确定移除？" onConfirm={() => handleRemoveUser(u.id)}>
+                        <Button type="link" size="small" danger>移除</Button>
+                      </Popconfirm>
+                    )},
+                  ]}
+                  pagination={{ current: usersPage, total: usersTotal, pageSize: 10, onChange: (p) => loadRoleUsers(usersRoleId, p) }}
+                  size="small" locale={{ emptyText: '暂无关联用户' }} />
+              </div>
+            ),
+          },
+        ]} />
       </Modal>
 
       {/* ── Data Scope Modal ── */}
