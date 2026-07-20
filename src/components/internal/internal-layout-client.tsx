@@ -25,6 +25,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
  const [pwdMsg, setPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [pwdFocus, setPwdFocus] = useState({ current: false, new: false, confirm: false })
   const [lastPwdChange, setLastPwdChange] = useState<string | null>(null)
+  const [permissions, setPermissions] = useState<string[]>([])
   const pwdCurrentRef = useRef<HTMLInputElement>(null)
  const searchRef = useRef<HTMLInputElement>(null)
 
@@ -34,6 +35,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
       .then(d => {
         if (d?.name) setUser(d)
         if (d?.passwordChangedAt) setLastPwdChange(d.passwordChangedAt)
+        if (Array.isArray(d?.permissions)) setPermissions(d.permissions)
       })
      .catch((err: any) => console.warn("[SilentError]", err))
 
@@ -126,6 +128,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
   }
 
   const roleLabel = user?.role === 'super_admin' ? '超级管理员' : user?.role === 'dept_admin' ? '部门管理员' : '员工'
+  const canSeePermission = (key: string) => permissions.includes('*') || permissions.includes(key) || permissions.some(p => p.startsWith(`${key}.`))
 
   const resetPwdForm = () => {
     setPwdForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
@@ -196,8 +199,12 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
           >
             <Search size={17} strokeWidth={1.5} />
           </button>
-          <button onClick={() => router.push('/internal/documents')} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-[0.78rem] text-neutral-600 border border-neutral-200 rounded-lg hover:bg-neutral-50 transition-colors"><FolderPlus size={14} strokeWidth={1.5} /><span>新建</span></button>
-          <div className="hidden sm:block w-px h-6 bg-neutral-200 mx-1" />
+          {canSeePermission('document.upload') && (
+            <>
+              <button onClick={() => router.push('/internal/documents')} className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-[0.78rem] text-neutral-600 border border-neutral-200 rounded-lg hover:bg-neutral-50 transition-colors"><FolderPlus size={14} strokeWidth={1.5} /><span>新建</span></button>
+              <div className="hidden sm:block w-px h-6 bg-neutral-200 mx-1" />
+            </>
+          )}
           {/* Notification */}
           <div className="relative">
           <button
@@ -265,7 +272,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
                       <Shield size={14} strokeWidth={1.5} className="text-neutral-400" />
                       我的权限
                     </button>
-                    {user.role === 'super_admin' && (
+                    {(canSeePermission('menu.admin.users') || canSeePermission('menu.admin')) && (
                       <>
                         <Link
                           href="/internal/admin/users"
@@ -275,6 +282,10 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
                           <Users size={14} strokeWidth={1.5} className="text-neutral-400" />
                           用户管理
                         </Link>
+                      </>
+                    )}
+                    {canSeePermission('menu.admin') && (
+                      <>
                         <Link
                           href="/internal/admin"
                           onClick={() => setUserMenuOpen(false)}
