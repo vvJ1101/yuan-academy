@@ -29,7 +29,7 @@ function readJsonIfExists(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8'))
 }
 
-export function readBrandPayload<TRecord extends Record<string, unknown>>(
+export function readBrandPayload<TRecord extends object>(
   type: BrandDataType,
   baseDir = defaultDir(),
 ): BrandDataPayload<TRecord> {
@@ -51,7 +51,7 @@ export function readBrandPayload<TRecord extends Record<string, unknown>>(
   }
 }
 
-export function writeBrandPayload<TRecord extends Record<string, unknown>>(
+export function writeBrandPayload<TRecord extends object>(
   type: BrandDataType,
   items: TRecord[],
   actor: string,

@@ -7,6 +7,7 @@
 import { prisma } from '@/lib/prisma'
 
 type AuditAction = 'view' | 'edit' | 'delete' | 'analyze' | 'upload' | 'preview' | 'download' | 'print'
+type PolicyAuditAction = 'policy:update' | 'policy:upload' | 'brandContact:upload'
 
 export async function logDocumentAccess(
   userId: string,
@@ -50,7 +51,7 @@ export function logDelete(userId: string, documentId: string) {
 /** Log a policy update or spreadsheet upload. */
 export async function logPolicyChange(
   userId: string,
-  action: 'policy:update' | 'policy:upload',
+  action: PolicyAuditAction,
 ) {
   try {
     await prisma.auditLog.create({ data: { userId, action } })
