@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'menu.dashboard', '无权查看首页推荐')
+  if (!guard.ok) return guard.response
 
-  const where = await buildDocumentWhere(session)
+  const activeSession = session!
+  const where = await buildDocumentWhere(activeSession)
 
   const [popularIds, deptDocs, recentAuditIds, riskDocs] = await Promise.all([
     // Popular by view count
@@ -21,15 +24,15 @@ export async function GET(req: NextRequest) {
       take: 8,
     }),
     // Same department docs
-    session.departmentId ? prisma.document.findMany({
-      where: { ...where, ownerDeptId: session.departmentId },
+    activeSession.departmentId ? prisma.document.findMany({
+      where: { ...where, ownerDeptId: activeSession.departmentId },
       select: { id: true, title: true, slug: true, category: true, ownerDept: { select: { name: true } },
         audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
       orderBy: { updatedAt: 'desc' }, take: 5,
     }) : Promise.resolve([]),
     // Recently viewed by this user
     prisma.auditLog.findMany({
-      where: { userId: session.id, action: 'view', documentId: { not: null } },
+      where: { userId: activeSession.id, action: 'view', documentId: { not: null } },
       orderBy: { createdAt: 'desc' }, take: 5,
       select: { documentId: true },
     }),
