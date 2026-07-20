@@ -27,6 +27,10 @@ function fmtTime(iso?: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function can(permissions: string[], key: string) {
+  return permissions.includes('*') || permissions.includes(key)
+}
+
 export default function BrandPage() {
   const searchParams = useSearchParams()
   const type = searchParams.get('type') === 'ordering' ? 'ordering' : 'contact'
@@ -42,6 +46,11 @@ export default function BrandPage() {
   const [countryFilter, setCountryFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [uploadOpen, setUploadOpen] = useState(false)
+  const [permissions, setPermissions] = useState<string[]>([])
+
+  const canExportMarket = can(permissions, 'brandContact.exportMarketFields')
+  const canExportFull = can(permissions, 'brandContact.exportFullFields')
+  const canExport = view === 'full' ? canExportFull : canExportMarket || canExportFull
 
   async function loadContactData() {
     setLoading(true)
@@ -68,6 +77,10 @@ export default function BrandPage() {
   }
 
   useEffect(() => {
+    fetch('/api/auth/me')
+      .then(response => response.json())
+      .then(data => { if (Array.isArray(data?.permissions)) setPermissions(data.permissions) })
+      .catch((err: any) => console.warn('[SilentError]', err))
     if (type === 'contact') loadContactData()
     else setLoading(false)
   }, [type])
@@ -121,12 +134,14 @@ export default function BrandPage() {
                 className="flex-1 min-h-[44px] px-3 py-2 text-[0.85rem] border border-neutral-200 rounded-lg focus:outline-none focus:border-[#2563EB]"
               />
               <div className="flex items-center gap-2 flex-wrap">
-                <a
-                  href="/api/brand-data/export?type=contact"
-                  className="inline-flex min-h-[44px] items-center gap-1.5 px-3 py-2 rounded-lg border border-neutral-200 bg-white text-[0.78rem] text-neutral-700 no-underline hover:bg-neutral-50"
-                >
-                  <Download size={14} /> 导出
-                </a>
+                {canExport && (
+                  <a
+                    href="/api/brand-data/export?type=contact"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 px-3 py-2 rounded-lg border border-neutral-200 bg-white text-[0.78rem] text-neutral-700 no-underline hover:bg-neutral-50"
+                  >
+                    <Download size={14} /> 导出
+                  </a>
+                )}
                 {canUpload && (
                   <button
                     type="button"
