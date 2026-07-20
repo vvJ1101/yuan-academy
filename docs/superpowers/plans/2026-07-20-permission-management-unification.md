@@ -8,6 +8,45 @@
 
 **Tech Stack:** Next.js 14 App Router, Prisma, SQLite, TypeScript, Node test runner, Tailwind CSS.
 
+## Current Implementation Status — 2026-07-20
+
+本轮已经把“权限管理模块可以完全推翻”的需求落成一套统一方向：菜单权限、按钮权限、API 守卫、数据权限共同生效。当前分支为 `codex/dependency-security-upgrade`，本地已保存为 17 个提交，尚未推送到远端。
+
+### 已完成
+
+- 建立 `docs/PERMISSION_MATRIX.md`，作为页面、按钮、API、数据范围的权限基准表。
+- 将权限解析统一到 `src/lib/permissions/rbac.ts`：优先读取用户覆盖权限，其次读取后台角色菜单权限，再兼容旧角色权限和默认角色。
+- 新增 `src/lib/permissions/guards.ts`，后端接口可统一调用 `requirePermission()` / `requireAnyPermission()`。
+- 角色权限页已改造为“权限树 + 数据权限 + 用户分配”的统一入口。
+- 侧边栏、管理中心入口、文档工作区动作、订货政策和品牌对接信息按钮已接入权限可见性。
+- 高风险写接口已补服务器端权限守卫：用户、组织、文件夹、角色、文档、FAQ、订货政策、品牌对接信息等。
+- AI、搜索、收藏、下载/打印、首页推荐、SOP、订货政策、历史记录等读/工具接口已补后端门禁与数据过滤。
+- 文档原文件下载、打印和历史记录已拆成独立权限点，预览不等于可下载/打印。
+- 已运行并通过：
+  - `npm run typecheck`
+  - `npm run build`
+
+### 最近新增的安全修复提交
+
+- `5f7acfe fix: guard ai bookmarks and file access APIs`
+  - AI 对话 / AI 搜索 / AI 推荐 / AI 风险分析补权限。
+  - 收藏列表和收藏动作补权限，并按可见文档范围过滤。
+  - 文档文件接口补原文件下载和打印权限。
+- `d1d5d0c fix: close remaining read permission gaps`
+  - 普通搜索补 `menu.search`。
+  - 首页推荐和 Dashboard 热门文档二次查询补数据范围过滤。
+  - 文档历史记录补 `document.historyView`。
+  - 订货政策模板、品牌对接模板下载改为上传权限用户可访问。
+- `957adbe fix: enforce menu permissions on page APIs`
+  - Dashboard、首页推荐、SOP、订货政策、后台菜单树、后台部门树等页面级 API 补菜单权限。
+
+### 下一步建议
+
+1. 做一轮手工账号验证：超级管理员、商品部、市场部、普通 viewer 各登录一次，看菜单、按钮和 API 返回是否符合预期。
+2. 补充更细的数据权限自动化测试，尤其是 `COMPANY`、`DEPARTMENT`、`DEPARTMENT_AND_CHILDREN`、`CUSTOM` 四类。
+3. 再检查组织/公司只读接口是否要从“登录可读”收紧为“按页面来源授权读取”。这部分可能被文档筛选、用户表单复用，需要先确认前端调用路径，避免误伤。
+4. 推送分支并创建 PR，进入部署前 Review。
+
 ## Global Constraints
 
 - Do not modify `src/lib/parser.ts`, `src/lib/prompts/*.ts`, `scripts/fts-migrate.ts`, or `src/types/dashboard.ts`.
