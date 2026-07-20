@@ -48,6 +48,7 @@ __MACOSX
 public/data/policies*.json
 public/showroom/data/policies*.json
 data/private/policies/policies*.json
+data/private/
 
 # User data
 用户素材/
