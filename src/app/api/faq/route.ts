@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
@@ -28,8 +29,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  if (session.role === 'staff') return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 })
+  const guard = await requirePermission(session, 'faq.create', '你没有新建 FAQ 的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const body = await req.json().catch(() => ({}))
   const { question, answer, departmentId, category } = body
@@ -39,15 +41,15 @@ export async function POST(req: NextRequest) {
   }
 
   // dept_admin: only create FAQ for own department
-  if (session.role === 'dept_admin') {
-    if (!session.departmentId || session.departmentId !== departmentId) {
+  if (activeSession.role === 'dept_admin') {
+    if (!activeSession.departmentId || activeSession.departmentId !== departmentId) {
       return NextResponse.json({ success: false, error: 'Forbidden: can only create FAQ for your department' }, { status: 403 })
     }
   }
 
   // Get max order for department
   const last = await prisma.faq.findFirst({
-    where: { departmentId: departmentId || session.departmentId },
+    where: { departmentId: departmentId || activeSession.departmentId },
     orderBy: { order: 'desc' },
   })
 
@@ -55,12 +57,13 @@ export async function POST(req: NextRequest) {
     data: {
       question,
       answer,
-      departmentId: departmentId || session.departmentId || '',
+      departmentId: departmentId || activeSession.departmentId || '',
       category: category || 'general',
       order: (last?.order ?? -1) + 1,
     },
     include: { department: { select: { name: true, slug: true } } },
   })
 
+  prisma.auditLog.create({ data: { userId: activeSession.id, action: 'faq:create' } }).catch((err: any) => console.error('[AuditLogError]', err))
   return NextResponse.json({ success: true, data: faq }, { status: 201 })
 }
