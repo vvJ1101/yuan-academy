@@ -11,7 +11,7 @@ const adminCards = [
   { href: '/internal/admin/users', icon: Users, title: '用户管理', desc: '管理员工账号、角色与权限', color: 'bg-blue-50 border-blue-100', permission: 'menu.admin.users' },
   { href: '/internal/documents', icon: BookOpen, title: '文档管理', desc: '上传、编辑、AI 解析知识文档', color: 'bg-green-50 border-green-100', permission: 'menu.documents' },
   { href: '/internal/admin/analytics', icon: BarChart3, title: '数据分析', desc: '跨部门访问统计与使用分析', color: 'bg-purple-50 border-purple-100', permission: 'menu.admin.analytics' },
-  { href: '/internal/admin/learning-paths', icon: GraduationCap, title: '学习路径', desc: '创建与管理部门学习计划', color: 'bg-amber-50 border-amber-100', permission: 'menu.admin.learningPath' },
+  { href: '/internal/admin/learning-paths', icon: GraduationCap, title: '学习路径', desc: '创建与管理部门学习计划', color: 'bg-amber-50 border-amber-100', permission: 'menu.admin.learningPaths' },
   { href: '/internal/faq', icon: MessageSquare, title: 'FAQ 管理', desc: '常见问题增删改查', color: 'bg-rose-50 border-rose-100', permission: 'menu.faq' },
   { href: '/internal/brand?type=contact', icon: Building2, title: '品牌资料', desc: '品牌对接信息与资料维护', color: 'bg-teal-50 border-teal-100', permission: 'menu.brand' },
   { href: '/internal/admin/role-permissions', icon: Shield, title: '角色权限', desc: '角色管理与权限分配', color: 'bg-violet-50 border-violet-100', permission: 'menu.admin.roles' },

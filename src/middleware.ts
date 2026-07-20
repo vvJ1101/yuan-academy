@@ -4,16 +4,6 @@ import { verifySessionToken, type SessionClaims } from '@/lib/session'
 
 // basePath 'https://academy.yuanshowroom.cn' is stripped before middleware sees the path
 const PUBLIC = ['/login', '/api/auth/login', '/api/auth/logout']
-const ADMIN_API = ['/api/documents']
-
-function checkAdminRoute(session: SessionClaims, pathname: string): boolean {
-  if (session.role === 'super_admin') return true
-  if (pathname.startsWith('/internal/admin/users') || pathname.startsWith('/api/users')) {
-    return false
-  }
-
-  return true
-}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
@@ -47,17 +37,6 @@ if (!pathname.startsWith('/internal') && !pathname.startsWith('/api') && pathnam
     const response = NextResponse.redirect(new URL('/login', request.url))
     response.cookies.set('session', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 })
     return response
-  }
-
-  if (!checkAdminRoute(session, pathname)) {
-    if (pathname.startsWith('/api')) return NextResponse.json({ error: '无权执行此操作' }, { status: 403 })
-    return NextResponse.redirect(new URL('/internal/dashboard', request.url))
-  }
-
-  if (ADMIN_API.some(p => pathname.startsWith(p)) && session.role !== 'super_admin' && session.role !== 'dept_admin') {
-    if (request.method !== 'GET') {
-      return NextResponse.json({ error: '无权执行此操作' }, { status: 403 })
-    }
   }
 
   return NextResponse.next()

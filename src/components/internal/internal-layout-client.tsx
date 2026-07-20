@@ -6,6 +6,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { InternalSidebar } from '@/components/internal/internal-sidebar'
  import { Search, FolderPlus, Bell, ChevronDown, LogOut, User, Users, Settings, Shield, X, KeyRound, Eye, EyeOff, Loader2, CheckCircle2 } from 'lucide-react'
 import { PasswordCharacter } from '@/components/internal/password-characters'
+import { RoutePermissionGuard } from '@/components/internal/route-permission-guard'
 
 export function InternalLayoutClient({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -357,7 +358,7 @@ export function InternalLayoutClient({ children }: { children: React.ReactNode }
 
         {/* Main Content */}
         <main className={pathname === '/internal/documents' ? 'flex-1 flex flex-col overflow-hidden' : 'flex-1 overflow-y-auto'}>
-          {children}
+          <RoutePermissionGuard>{children}</RoutePermissionGuard>
         </main>
       </div>
 
