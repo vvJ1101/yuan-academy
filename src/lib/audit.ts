@@ -7,7 +7,7 @@
 import { prisma } from '@/lib/prisma'
 
 type AuditAction = 'view' | 'edit' | 'delete' | 'analyze' | 'upload' | 'preview' | 'download' | 'print'
-type PolicyAuditAction = 'policy:update' | 'policy:upload' | 'brandContact:upload'
+type PolicyAuditAction = 'policy:update' | 'policy:upload' | 'brandContact:upload' | 'brandContact:update'
 
 export async function logDocumentAccess(
   userId: string,

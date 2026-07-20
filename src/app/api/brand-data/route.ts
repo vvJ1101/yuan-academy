@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookies } from '@/lib/auth'
-import { getContactView } from '@/lib/brand-data-access'
+import { canEditContact, canUploadContact, getContactView } from '@/lib/brand-data-access'
 import { projectContactRecord } from '@/lib/brand-data-fields'
 import { readBrandPayload } from '@/lib/brand-data-store'
 import type { BrandContactRecord } from '@/types/brand-data'
@@ -25,10 +25,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       items: payload.items.map(item => projectContactRecord(item, view)),
       view,
+      canEdit: await canEditContact(session),
+      canUpload: await canUploadContact(session),
       updatedAt: payload.updatedAt,
       updatedBy: payload.updatedBy,
     })
   } catch {
-    return NextResponse.json({ items: [], view, updatedAt: '', updatedBy: '' })
+    return NextResponse.json({
+      items: [],
+      view,
+      canEdit: await canEditContact(session),
+      canUpload: await canUploadContact(session),
+      updatedAt: '',
+      updatedBy: '',
+    })
   }
 }

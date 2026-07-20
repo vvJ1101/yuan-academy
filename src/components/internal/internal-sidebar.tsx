@@ -44,14 +44,12 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [renameSaving, setRenameSaving] = useState(false)
 
   const [userPerms, setUserPerms] = useState<string[]>(['*'])
-  const [departmentName, setDepartmentName] = useState('')
   const [permList, setPermList] = useState<string[]>(['*'])
   const [folderPerms, setFolderPerms] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetch('/api/auth/me').then(r=>r.json()).then(u=>{
       if(u?.permissions) setUserPerms(u.permissions)
-      if(u?.departmentName) setDepartmentName(u.departmentName)
     }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch((err: any) => console.warn("[SilentError]", err))
 
@@ -245,10 +243,11 @@ function PermBadge({ perm }: { perm: string }) {
   const canSeePermission = (permKey?: string) => {
     if (!permKey) return true
     if (userPerms.includes('*') || permList.includes('*')) return true
+    if (userPerms.includes(permKey)) return true
     if (permList.includes(permKey)) return true
     if (permKey === 'admin' && permList.some(p => p.startsWith('admin:'))) return true
+    if (permKey === 'menu.brand' && userPerms.some(p => p.startsWith('menu.brand.'))) return true
     if (permKey === 'menu.brand' && permList.some(p => p.startsWith('menu.brand.'))) return true
-    if (permKey.startsWith('menu.brand.') && (departmentName === '商品部' || departmentName === '市场部')) return true
     return false
   }
   const visibleBrandLinks = BRAND_LINKS.filter(link => canSeePermission(link.permKey) || canSeePermission('menu.brand'))

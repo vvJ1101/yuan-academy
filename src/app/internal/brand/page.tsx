@@ -14,6 +14,8 @@ type ContactItem = Record<string, string | undefined>
 interface ContactResponse {
   items: ContactItem[]
   view: 'market' | 'full'
+  canEdit?: boolean
+  canUpload?: boolean
   updatedAt: string
   updatedBy: string
   error?: string
@@ -30,6 +32,8 @@ export default function BrandPage() {
   const type = searchParams.get('type') === 'ordering' ? 'ordering' : 'contact'
   const [items, setItems] = useState<ContactItem[]>([])
   const [view, setView] = useState<'market' | 'full'>('market')
+  const [canEdit, setCanEdit] = useState(false)
+  const [canUpload, setCanUpload] = useState(false)
   const [updatedAt, setUpdatedAt] = useState('')
   const [updatedBy, setUpdatedBy] = useState('')
   const [loading, setLoading] = useState(true)
@@ -52,6 +56,8 @@ export default function BrandPage() {
       }
       setItems(Array.isArray(data.items) ? data.items : [])
       setView(data.view || 'market')
+      setCanEdit(Boolean(data.canEdit))
+      setCanUpload(Boolean(data.canUpload))
       setUpdatedAt(data.updatedAt || '')
       setUpdatedBy(data.updatedBy || '')
     } catch {
@@ -121,7 +127,7 @@ export default function BrandPage() {
                 >
                   <Download size={14} /> 导出
                 </a>
-                {view === 'full' && (
+                {canUpload && (
                   <button
                     type="button"
                     onClick={() => setUploadOpen(true)}
@@ -156,7 +162,13 @@ export default function BrandPage() {
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {filtered.map((item, index) => (
-                <ContactCard key={`${item.brandName || 'brand'}-${index}`} item={item} view={view} />
+                <ContactCard
+                  key={`${item.brandName || 'brand'}-${index}`}
+                  item={item}
+                  view={view}
+                  canEdit={canEdit}
+                  onUpdated={canEdit ? loadContactData : undefined}
+                />
               ))}
             </div>
           )}
