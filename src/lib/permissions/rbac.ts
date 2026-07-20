@@ -1,5 +1,5 @@
-import { prisma } from '@/lib/prisma'
-import type { SessionUser } from '@/lib/auth'
+import { prisma } from '../prisma'
+import type { SessionUser } from '../auth'
 
 // ── Default permissions per role (fallback if RolePermission not in DB) ──
 const DEFAULT_PERMISSIONS: Record<string, string[]> = {
@@ -25,7 +25,112 @@ const DEFAULT_PERMISSIONS: Record<string, string[]> = {
 }
 
 // ── Cache ──
-const cache = new Map<string, { permissions: string[]; dataScope: { companies: string[]; departments: string[] } }>()
+export type PermissionDataScope = {
+  mode: 'ALL' | 'COMPANY' | 'DEPARTMENT' | 'DEPARTMENT_AND_CHILDREN' | 'SELF' | 'CUSTOM'
+  companies: string[]
+  departments: string[]
+  folders: string[]
+  users: string[]
+}
+
+const EMPTY_SCOPE: PermissionDataScope = {
+  mode: 'SELF',
+  companies: [],
+  departments: [],
+  folders: [],
+  users: [],
+}
+
+const SCOPE_PRIORITY: Record<PermissionDataScope['mode'], number> = {
+  SELF: 1,
+  CUSTOM: 2,
+  DEPARTMENT: 3,
+  COMPANY: 4,
+  DEPARTMENT_AND_CHILDREN: 5,
+  ALL: 6,
+}
+
+type ResolvedPermissions = {
+  permissions: string[]
+  dataScope: PermissionDataScope
+}
+
+const cache = new Map<string, ResolvedPermissions>()
+
+function uniquePermissions(values: Iterable<string | null | undefined>): string[] {
+  return Array.from(new Set(Array.from(values).filter((value): value is string => Boolean(value))))
+}
+
+function permissionListHas(permissions: Iterable<string>, key: string): boolean {
+  const permissionSet = new Set(permissions)
+  return permissionSet.has('*') || permissionSet.has(key)
+}
+
+function normalizeDataScope(value: unknown): PermissionDataScope {
+  if (!value || typeof value !== 'object') return EMPTY_SCOPE
+  const scope = value as Partial<PermissionDataScope>
+  return {
+    ...EMPTY_SCOPE,
+    ...scope,
+    companies: Array.isArray(scope.companies) ? scope.companies : [],
+    departments: Array.isArray(scope.departments) ? scope.departments : [],
+    folders: Array.isArray(scope.folders) ? scope.folders : [],
+    users: Array.isArray(scope.users) ? scope.users : [],
+  }
+}
+
+function scopeModeFromSysRole(value: number | null | undefined): PermissionDataScope['mode'] {
+  if (value === 1) return 'ALL'
+  if (value === 2) return 'DEPARTMENT_AND_CHILDREN'
+  if (value === 3) return 'DEPARTMENT'
+  if (value === 4) return 'SELF'
+  if (value === 5) return 'CUSTOM'
+  return 'SELF'
+}
+
+function parseJsonArray(value: string | null | undefined): string[] {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && Boolean(item)) : []
+  } catch {
+    return []
+  }
+}
+
+function mergeRoleDataScopes(
+  roles: Array<{ dataScope: number; customDeptIds: string }>,
+  user: SessionUser,
+): PermissionDataScope {
+  if (user.role === 'super_admin') return { ...EMPTY_SCOPE, mode: 'ALL' }
+  if (roles.length === 0) return EMPTY_SCOPE
+
+  let mode: PermissionDataScope['mode'] = 'SELF'
+  const departments = new Set<string>()
+  const companies = new Set<string>()
+  const users = new Set<string>()
+
+  if (user.companyId) companies.add(user.companyId)
+  if (user.departmentId) departments.add(user.departmentId)
+  users.add(user.id)
+
+  for (const role of roles) {
+    const roleMode = scopeModeFromSysRole(role.dataScope)
+    if (SCOPE_PRIORITY[roleMode] > SCOPE_PRIORITY[mode]) mode = roleMode
+    for (const deptId of parseJsonArray(role.customDeptIds)) departments.add(deptId)
+  }
+
+  return {
+    ...EMPTY_SCOPE,
+    mode,
+    companies: Array.from(companies),
+    departments: Array.from(departments),
+    users: Array.from(users),
+  }
+}
+
+export const uniquePermissionsForTest = uniquePermissions
+export const permissionListHasForTest = permissionListHas
+export const mergeRoleDataScopesForTest = mergeRoleDataScopes
 
 export function clearPermissionCache(userId?: string) {
   if (userId) cache.delete(userId)
@@ -35,7 +140,7 @@ export function clearPermissionCache(userId?: string) {
 /** Compute permissions for a user: UserPermission (override) > RolePermission > default */
 export async function getUserPermissions(user: SessionUser): Promise<{
   permissions: string[]
-  dataScope: { companies: string[]; departments: string[] }
+  dataScope: PermissionDataScope
 }> {
   if (cache.has(user.id)) return cache.get(user.id)!
 
@@ -46,21 +151,48 @@ export async function getUserPermissions(user: SessionUser): Promise<{
     )
     if (rows.length > 0) {
       const result = {
-        permissions: JSON.parse(rows[0].permissions || '[]'),
-        dataScope: JSON.parse(rows[0].dataScope || '{}'),
+        permissions: uniquePermissions(JSON.parse(rows[0].permissions || '[]')),
+        dataScope: normalizeDataScope(JSON.parse(rows[0].dataScope || '{}')),
       }
       cache.set(user.id, result)
       return result
     }
 
-    // 2. Check RolePermission via raw SQL
+    // 2. Check admin-managed role menu permissions
+    const userRoles = await prisma.sysUserRole.findMany({
+      where: { userId: user.id },
+      include: {
+        role: {
+          include: {
+            menus: { include: { menu: true } },
+          },
+        },
+      },
+    })
+
+    const roleMenuPermissions = uniquePermissions(
+      userRoles.flatMap(userRole => userRole.role.menus.map(roleMenu => roleMenu.menu.permission)),
+    )
+
+    if (roleMenuPermissions.length > 0) {
+      const result = {
+        permissions: user.role === 'super_admin'
+          ? uniquePermissions(['*', ...roleMenuPermissions])
+          : roleMenuPermissions,
+        dataScope: mergeRoleDataScopes(userRoles.map(userRole => userRole.role), user),
+      }
+      cache.set(user.id, result)
+      return result
+    }
+
+    // 3. Check legacy RolePermission via raw SQL
     const roleRows: any[] = await prisma.$queryRawUnsafe(
       'SELECT permissions FROM RolePermission WHERE role = ?', user.role
     )
     if (roleRows.length > 0) {
       const result = {
-        permissions: JSON.parse(roleRows[0].permissions || '[]'),
-        dataScope: { companies: [], departments: [] },
+        permissions: uniquePermissions(JSON.parse(roleRows[0].permissions || '[]')),
+        dataScope: EMPTY_SCOPE,
       }
       cache.set(user.id, result)
       return result
@@ -69,10 +201,10 @@ export async function getUserPermissions(user: SessionUser): Promise<{
     // DB table might not exist yet — fall through to defaults
   }
 
-  // 3. Fallback to defaults
+  // 4. Fallback to defaults
   const result = {
     permissions: DEFAULT_PERMISSIONS[user.role] || DEFAULT_PERMISSIONS.viewer,
-    dataScope: { companies: [], departments: [] },
+    dataScope: EMPTY_SCOPE,
   }
   cache.set(user.id, result)
   return result
@@ -81,15 +213,14 @@ export async function getUserPermissions(user: SessionUser): Promise<{
 /** Check if user has a specific permission key */
 export async function hasPermission(user: SessionUser, key: string): Promise<boolean> {
   const { permissions } = await getUserPermissions(user)
-  if (permissions.includes('*')) return true
-  return permissions.includes(key)
+  return permissionListHas(permissions, key)
 }
 
 /** Check if user has any of the given permission keys */
 export async function hasAnyPermission(user: SessionUser, keys: string[]): Promise<boolean> {
   const { permissions } = await getUserPermissions(user)
-  if (permissions.includes('*')) return true
-  return keys.some(k => permissions.includes(k))
+  if (permissionListHas(permissions, '*')) return true
+  return keys.some(k => permissionListHas(permissions, k))
 }
 
 // ── Default role permission keys for seeding / reference ──
