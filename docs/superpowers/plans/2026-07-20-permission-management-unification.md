@@ -39,6 +39,10 @@
   - 订货政策模板、品牌对接模板下载改为上传权限用户可访问。
 - `957adbe fix: enforce menu permissions on page APIs`
   - Dashboard、首页推荐、SOP、订货政策、后台菜单树、后台部门树等页面级 API 补菜单权限。
+- `376cbe0 fix: filter document graph and align permission keys`
+  - 文档关系图的前置、相关、依赖、同阶段文档全部按可见文档范围过滤。
+  - 用户公司归属读取改为按用户管理权限判断，不再写死超级管理员。
+  - RBAC 兜底权限列表补齐新菜单和按钮权限 key。
 
 ### 下一步建议
 
