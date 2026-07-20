@@ -24,7 +24,7 @@ interface Doc {
 }
 interface Folder { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; inheritPermissions: boolean; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
-interface Me { id: string; name: string; role: string; departmentId: string; companyId: string; departmentName: string; companyName: string }
+interface Me { id: string; name: string; role: string; departmentId: string; companyId: string; departmentName: string; companyName: string; permissions?: string[] }
 interface Dept { id: string; name: string; slug: string; companyId: string }
 interface User { id: string; name: string; email: string; role: string; departmentId: string }
 interface PermEntry { id: string; companyId: string | null; company?: { id: string; name: string } | null; departmentId: string | null; department?: { id: string; name: string } | null; userId: string | null; user?: { id: string; name: string; email: string } | null; role: string | null; permission: string }
@@ -36,6 +36,7 @@ const PERM_LEVEL: Record<string, number> = { view: 1, edit: 2, delete: 3, admin:
 
 function fmtSize(d: Doc): string { if (d.fileSize) { const b = d.fileSize; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` } const c = d.fullContent || d.condensedContent || ''; const b = new Blob([c]).size; if (b < 1024) return `${b} B`; if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`; return `${(b / (1024 * 1024)).toFixed(1)} MB` }
 function permOk(p: string|null, r: string): boolean { if(!p) return false; return (PERM_LEVEL[p]||0) >= (PERM_LEVEL[r]||0) }
+function can(permissions: string[], key: string) { return permissions.includes('*') || permissions.includes(key) }
 function fileIcon(d: Doc) { 
   let t = 'other'
   if (d.fileType) {
@@ -82,8 +83,18 @@ function DocumentsContent() {
   const [recDocs, setRecDocs] = useState<{id:string;title:string;slug:string;category:string;reason?:string;department?:string;ownerDept?:{name:string;slug:string}|null;audiences?:{department:{slug:string}}[];audienceSlug?:string}[]>([])
   const [hotDocs, setHotDocs] = useState<{id:string;title:string;slug:string;category:string;department?:string;audienceSlug?:string;viewCount?:number;updatedAt?:string;ownerDept?:{name:string;slug:string};audiences?:{department:{slug:string}}[]}[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [permissions, setPermissions] = useState<string[]>([])
   const isSuper = me?.role === 'super_admin'
-  const canUpload = isSuper || me?.role === 'dept_admin'
+  const canUpload = can(permissions, 'document.upload')
+  const canEditDocument = can(permissions, 'document.edit')
+  const canDeleteDocument = can(permissions, 'document.delete')
+  const canReplaceDocument = can(permissions, 'document.replace')
+  const canAnalyzeDocument = can(permissions, 'document.aiAnalyze')
+  const canOcrDocument = can(permissions, 'document.ocr')
+  const canBatchManageDocuments = can(permissions, 'document.batchManage')
+  const canCreateFolder = can(permissions, 'folder.create')
+  const canEditFolder = can(permissions, 'folder.edit')
+  const canDeleteFolder = can(permissions, 'folder.delete')
 
   // ── Batch selection ──
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -94,6 +105,10 @@ function DocumentsContent() {
     setSelectedIds(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
   async function batchDelete() {
+    if (!canBatchManageDocuments || !canDeleteDocument) {
+      setToastMsg('你没有批量删除文档的权限'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000)
+      return
+    }
     if (selectedIds.size === 0) return
     if (!confirm(`确定删除选中的 ${selectedIds.size} 个文档？此操作不可恢复。`)) return
     setBatchDeleting(true)
@@ -102,6 +117,10 @@ function DocumentsContent() {
     setSelectedIds(new Set()); setBatchDeleting(false); refresh(); window.dispatchEvent(new Event('folderRefresh'))
   }
   async function batchMove(fid: string | null) {
+    if (!canBatchManageDocuments || !canEditDocument) {
+      setToastMsg('你没有批量移动文档的权限'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000)
+      return
+    }
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
     await fetch('/api/documents/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move', ids, folderId: fid }) })
@@ -109,7 +128,7 @@ function DocumentsContent() {
   }
 
   // ── Data ──
-  const loadData = useCallback(()=>{Promise.all([fetch('/api/documents').then(r=>r.json()),fetch('/api/folders').then(r=>r.json()),fetch('/api/companies').then(r=>r.json()),fetch('/api/departments').then(r=>r.json()),fetch('/api/auth/me').then(r=>r.json()),fetch('/api/users').then(r=>r.json()).catch(()=>[])]).then(([d,f,comps,deptList,u,userList])=>{setDocs(Array.isArray(d)?d:[]);setFolders(f?.folders||[]);if(Array.isArray(comps))setCompanies(comps);if(Array.isArray(deptList))setDepts(deptList);if(Array.isArray(userList))setUsers(userList);if(u?.role)setMe(u);setLoading(false)}).catch(()=>setLoading(false))},[])
+  const loadData = useCallback(()=>{Promise.all([fetch('/api/documents').then(r=>r.json()),fetch('/api/folders').then(r=>r.json()),fetch('/api/companies').then(r=>r.json()),fetch('/api/departments').then(r=>r.json()),fetch('/api/auth/me').then(r=>r.json()),fetch('/api/users').then(r=>r.json()).catch(()=>[])]).then(([d,f,comps,deptList,u,userList])=>{setDocs(Array.isArray(d)?d:[]);setFolders(f?.folders||[]);if(Array.isArray(comps))setCompanies(comps);if(Array.isArray(deptList))setDepts(deptList);if(Array.isArray(userList))setUsers(userList);if(Array.isArray(u?.permissions))setPermissions(u.permissions);if(u?.role)setMe(u);setLoading(false)}).catch(()=>setLoading(false))},[])
   useEffect(()=>{loadData()},[loadData])
   // Global ESC handler for all modals
   useEffect(()=>{
@@ -171,7 +190,7 @@ function DocumentsContent() {
     return 0
   })
 
-  const manageableDocs = filtered.filter(d => permOk(docPerm(d), 'edit'))
+  const manageableDocs = filtered.filter(d => canBatchManageDocuments && canEditDocument && permOk(docPerm(d), 'edit'))
   const isAllSelected = selectedIds.size > 0 && selectedIds.size === manageableDocs.length
   const isSomeSelected = selectedIds.size > 0 && !isAllSelected
 
@@ -229,16 +248,19 @@ function DocumentsContent() {
   const toggleExpand = (id: string) => { setExpanded(prev=>{ const n=new Set(prev); if(n.has(id))n.delete(id);else n.add(id);return n }) }
   const selectSpace = (id: string) => { setSpaceFilter(id); setFolderFilter(''); setSearch('') }
   const resetUpload = ()=>{setUpTitle('');setUpFile(null);setUpFolderId('');setUpCat('sop');setUpAiParse(false);setUpStatus('idle');setUpMsg('');setUpDoc(null)}
-  const openUpload = (fid: string) => { resetUpload(); setUpFolderId(fid); setShowUpload(true) }
+  const openUpload = (fid: string) => {
+    if (!canUpload) { setToastMsg('你没有上传文档的权限'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000); return }
+    resetUpload(); setUpFolderId(fid); setShowUpload(true)
+  }
 
-  async function handleUpload(e:React.FormEvent){e.preventDefault();if(upStatus!=='idle'||!upFile||!upTitle||!upFolderId)return;setUpStatus('uploading');const fd=new FormData();fd.append('file',upFile);fd.append('title',upTitle);fd.append('category',upCat);fd.append('authorId',me?.id||'');fd.append('folderId',upFolderId);try{const res=await fetch('/api/documents',{method:'POST',body:fd});if(res.ok){const u=await res.json();setUpDoc(u);setUpStatus('done');setUpMsg('上传成功');refresh();window.dispatchEvent(new Event('folderRefresh'))}else{const e=await res.json().catch(()=>({}));setUpStatus('error');setUpMsg(e.error||'上传失败')}}catch{setUpStatus('error');setUpMsg('网络错误')}}
-  async function createFolder(name:string,parentId:string){if(!name.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),parentId,inheritPermissions:true})});loadData();window.dispatchEvent(new Event('folderRefresh'));setExpanded(prev=>{const n=new Set(prev);n.add(parentId);return n})}
-  async function createSpace(){if(!nsName.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nsName.trim(),parentId:null,companyId:nsCompanyId||null,inheritPermissions:true})});setNewSpaceOpen(false);setNsName('');setNsCompanyId('');loadData();window.dispatchEvent(new Event('folderRefresh'))}
-  async function renameFolder(f:Folder){const n=prompt('新名称:',f.name);if(n&&n!==f.name){await fetch('/api/folders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:f.id,name:n})});loadData();window.dispatchEvent(new Event('folderRefresh'))}}
-  async function deleteFolder(f:Folder){if(!confirm(`删除「${f.name}」？子文件夹和文件将移至上级目录。`))return;const wasSpace=spaceFilter===f.id;await fetch(`/api/folders?id=${f.id}`,{method:'DELETE'});loadData();refresh();window.dispatchEvent(new Event('folderRefresh'));if(wasSpace){const remaining=folders.filter((x:Folder)=>!x.parentId&&x.id!==f.id);setSpaceFilter(remaining[0]?.id||'');setFolderFilter('');setSelectedDoc(null)}else if(folderFilter===f.id){setFolderFilter('')}}
-  async function triggerAi(doc:Doc){const res=await fetch(`/api/documents/${doc.id}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:doc.title,category:doc.category,fullContent:doc.fullContent||doc.content||''})});if(res.ok){refresh();const d=await res.json();setSelectedDoc(d?.document||d)}}
-  async function deleteDoc(doc:Doc){if(!confirm(`删除「${doc.title}」？`))return;await fetch(`/api/documents/${doc.id}`,{method:'DELETE'});refresh();setSelectedDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
-  async function moveDocument(docId:string,fid:string|null){await fetch(`/api/documents/${docId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:fid||null})});refresh();setMoveDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
+  async function handleUpload(e:React.FormEvent){e.preventDefault();if(!canUpload){setUpStatus('error');setUpMsg('你没有上传文档的权限');return}if(upStatus!=='idle'||!upFile||!upTitle||!upFolderId)return;setUpStatus('uploading');const fd=new FormData();fd.append('file',upFile);fd.append('title',upTitle);fd.append('category',upCat);fd.append('authorId',me?.id||'');fd.append('folderId',upFolderId);try{const res=await fetch('/api/documents',{method:'POST',body:fd});if(res.ok){const u=await res.json();setUpDoc(u);setUpStatus('done');setUpMsg('上传成功');refresh();window.dispatchEvent(new Event('folderRefresh'))}else{const e=await res.json().catch(()=>({}));setUpStatus('error');setUpMsg(e.error||'上传失败')}}catch{setUpStatus('error');setUpMsg('网络错误')}}
+  async function createFolder(name:string,parentId:string){if(!canCreateFolder){setToastMsg('你没有新建文件夹的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}if(!name.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name.trim(),parentId,inheritPermissions:true})});loadData();window.dispatchEvent(new Event('folderRefresh'));setExpanded(prev=>{const n=new Set(prev);n.add(parentId);return n})}
+  async function createSpace(){if(!canCreateFolder){setToastMsg('你没有新建知识空间的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}if(!nsName.trim())return;await fetch('/api/folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nsName.trim(),parentId:null,companyId:nsCompanyId||null,inheritPermissions:true})});setNewSpaceOpen(false);setNsName('');setNsCompanyId('');loadData();window.dispatchEvent(new Event('folderRefresh'))}
+  async function renameFolder(f:Folder){if(!canEditFolder){setToastMsg('你没有重命名文件夹的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}const n=prompt('新名称:',f.name);if(n&&n!==f.name){await fetch('/api/folders',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:f.id,name:n})});loadData();window.dispatchEvent(new Event('folderRefresh'))}}
+  async function deleteFolder(f:Folder){if(!canDeleteFolder){setToastMsg('你没有删除文件夹的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}if(!confirm(`删除「${f.name}」？子文件夹和文件将移至上级目录。`))return;const wasSpace=spaceFilter===f.id;await fetch(`/api/folders?id=${f.id}`,{method:'DELETE'});loadData();refresh();window.dispatchEvent(new Event('folderRefresh'));if(wasSpace){const remaining=folders.filter((x:Folder)=>!x.parentId&&x.id!==f.id);setSpaceFilter(remaining[0]?.id||'');setFolderFilter('');setSelectedDoc(null)}else if(folderFilter===f.id){setFolderFilter('')}}
+  async function triggerAi(doc:Doc){if(!canAnalyzeDocument){setToastMsg('你没有 AI 解析文档的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}const res=await fetch(`/api/documents/${doc.id}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:doc.title,category:doc.category,fullContent:doc.fullContent||doc.content||''})});if(res.ok){refresh();const d=await res.json();setSelectedDoc(d?.document||d)}}
+  async function deleteDoc(doc:Doc){if(!canDeleteDocument){setToastMsg('你没有删除文档的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}if(!confirm(`删除「${doc.title}」？`))return;await fetch(`/api/documents/${doc.id}`,{method:'DELETE'});refresh();setSelectedDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
+  async function moveDocument(docId:string,fid:string|null){if(!canEditDocument){setToastMsg('你没有移动文档的权限');setToastType('error');setTimeout(()=>setToastMsg(''),3000);return}await fetch(`/api/documents/${docId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({folderId:fid||null})});refresh();setMoveDoc(null);window.dispatchEvent(new Event('folderRefresh'))}
 
   if(loading)return <DocListSkeleton />
 
@@ -291,22 +313,22 @@ function DocumentsContent() {
               <option value="name">标题 A-Z</option>
               <option value="category">按分类</option>
             </select>
-            {canUpload && (
+            {(canUpload || canCreateFolder) && (
               <>
+                {canUpload && (
                 <button onClick={() => currentSpace && openUpload(uploadTargetId)}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-[#2563EB] text-white text-[0.72rem] font-medium rounded-lg hover:bg-blue-600 transition-colors shrink-0">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                   上传
                 </button>
+                )}
+                {canCreateFolder && (
                 <button onClick={() => { const n = prompt('文件夹名称:'); if (n && currentSpace) createFolder(n, folderFilter || spaceFilter) }}
                   className="flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 text-neutral-600 text-[0.72rem] rounded-lg hover:bg-neutral-50 transition-colors shrink-0">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14M5 12h14"/></svg>
                   新建文件夹
                 </button>
-                <button className="flex items-center gap-1.5 px-3 py-1.5 border border-neutral-200 text-neutral-600 text-[0.72rem] rounded-lg hover:bg-neutral-50 transition-colors shrink-0">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-                  分享
-                </button>
+                )}
               </>
             )}
             <button className="flex items-center gap-1 px-2.5 py-1.5 border border-neutral-200 text-neutral-600 text-[0.72rem] rounded-lg hover:bg-neutral-50 transition-colors shrink-0">
@@ -345,7 +367,7 @@ function DocumentsContent() {
             <table className="w-full bg-white">
               <thead>
                 <tr className="bg-neutral-50 border-b border-neutral-200" style={{ height: '38px' }}>
-                  {canUpload && (
+                  {canBatchManageDocuments && (
                     <th className="text-center px-2 py-2 w-[36px]">
                       <input type="checkbox"
                         checked={isAllSelected}
@@ -376,7 +398,7 @@ function DocumentsContent() {
                       style={{ height: '44px' }}
                       className={`border-b border-neutral-100 transition-colors ${canClick ? 'cursor-pointer' : ''} ${isSelected ? 'bg-[#EBF5FF]' : 'hover:bg-neutral-50'}`}
                     >
-                      {canUpload && (
+                      {canBatchManageDocuments && (
                         <td className="text-center px-2" onClick={e => e.stopPropagation()}>
                           <input type="checkbox"
                             checked={selectedIds.has(d.id)}
@@ -456,18 +478,18 @@ function DocumentsContent() {
         </div>
 
         {/* ═══ Batch Action Bar ═══ */}
-        {selectedIds.size > 0 && (
+        {selectedIds.size > 0 && canBatchManageDocuments && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-5 py-3 bg-[#111] text-white rounded-xl shadow-2xl">
             <span className="text-[0.78rem] font-medium">已选 {selectedIds.size} 项</span>
             <div className="w-px h-5 bg-white/20" />
-            <button onClick={() => setBatchMoveOpen(true)}
+            {canEditDocument && <button onClick={() => setBatchMoveOpen(true)}
               className="px-3 py-1.5 text-[0.75rem] font-medium bg-white/15 hover:bg-white/25 rounded-lg transition-colors">
               移动到...
-            </button>
-            <button onClick={batchDelete} disabled={batchDeleting}
+            </button>}
+            {canDeleteDocument && <button onClick={batchDelete} disabled={batchDeleting}
               className="px-3 py-1.5 text-[0.75rem] font-medium bg-red-500/80 hover:bg-red-500 rounded-lg transition-colors disabled:opacity-50">
               {batchDeleting ? '删除中...' : '批量删除'}
-            </button>
+            </button>}
             <button onClick={() => setSelectedIds(new Set())}
               className="px-3 py-1.5 text-[0.75rem] text-white/60 hover:text-white transition-colors">
               取消
@@ -530,7 +552,7 @@ function DocumentsContent() {
       <DetailPanel doc={selectedDoc} onClose={() => setSelectedDoc(null)} />
 
       {/* ═══ Hidden inputs + Modals ═══ */}
-      <input type="file" id="replaceFileInput" accept=".docx,.pptx,.ppt" className="hidden" onChange={async e => { const f = e.target.files?.[0]; const target = replaceDoc || ctxMenu?.doc; if (!f || !target) return; const fd = new FormData(); fd.append('file', f); const res = await fetch(`/api/documents/${target.id}/replace`, { method: 'POST', body: fd }); if (res.ok) { refresh(); setToastMsg('覆盖上传成功'); setToastType('success'); setTimeout(() => setToastMsg(''), 3000) } else { const d = await res.json().catch(() => ({})); setToastMsg(d.error || '覆盖失败'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000) } e.target.value = ''; setCtxMenu(null); setReplaceDoc(null) }} />
+      <input type="file" id="replaceFileInput" accept=".docx,.pptx,.ppt" className="hidden" onChange={async e => { const f = e.target.files?.[0]; const target = replaceDoc || ctxMenu?.doc; if (!f || !target) return; if (!canReplaceDocument) { setToastMsg('你没有覆盖上传的权限'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000); e.target.value = ''; return } const fd = new FormData(); fd.append('file', f); const res = await fetch(`/api/documents/${target.id}/replace`, { method: 'POST', body: fd }); if (res.ok) { refresh(); setToastMsg('覆盖上传成功'); setToastType('success'); setTimeout(() => setToastMsg(''), 3000) } else { const d = await res.json().catch(() => ({})); setToastMsg(d.error || '覆盖失败'); setToastType('error'); setTimeout(() => setToastMsg(''), 3000) } e.target.value = ''; setCtxMenu(null); setReplaceDoc(null) }} />
 
       {/* Context Menus */}
       {ctxMenu && (() => {
@@ -538,11 +560,17 @@ function DocumentsContent() {
         const items: any[] = [
           { label: '打开阅读', onClick: () => { if (!permOk(p, 'view')) return; window.open(`/internal/docs/${ctxMenu.doc.audiences?.[0]?.department?.slug || ctxMenu.doc.ownerDept?.slug || 'doc'}/${encodeURIComponent(ctxMenu.doc.slug)}`, '_blank') } },
         ]
-        if (permOk(p, 'edit')) {
+        if (permOk(p, 'edit') && canEditDocument) {
           items.push(
-            { label: '覆盖上传', onClick: () => document.getElementById('replaceFileInput')?.click() },
             { label: '重命名', onClick: async () => { const n = prompt('新名称:', ctxMenu.doc.title); if (n && n !== ctxMenu.doc.title) { await fetch(`/api/documents/${ctxMenu.doc.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: n }) }); refresh() } } },
             { label: '移动到...', onClick: () => { setMoveDoc(ctxMenu.doc); setCtxMenu(null) } },
+          )
+        }
+        if (permOk(p, 'edit') && canReplaceDocument) {
+          items.push({ label: '覆盖上传', onClick: () => document.getElementById('replaceFileInput')?.click() })
+        }
+        if (permOk(p, 'edit') && canOcrDocument) {
+          items.push(
             { label: '图片 OCR 识别', onClick: async () => {
               setCtxMenu(null)
               setToastMsg('OCR 识别中，请稍候...'); setToastType('success')
@@ -561,27 +589,29 @@ function DocumentsContent() {
             } },
           )
         }
-        if (permOk(p, 'admin')) {
+        if (permOk(p, 'admin') && canEditDocument) {
           items.push({ label: '编辑权限', onClick: () => { setDocPermTarget(ctxMenu.doc); setCtxMenu(null) } })
         }
-        if (permOk(p, 'delete')) {
+        if (permOk(p, 'delete') && canDeleteDocument) {
           items.push({ label: '删除', onClick: () => deleteDoc(ctxMenu.doc), danger: true })
         }
        return <ContextMenu x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} items={items} />
      })()}
       {sCtx && (
         <ContextMenu x={sCtx.x} y={sCtx.y} onClose={() => setSCtx(null)} items={[
-          { label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, sCtx.space.id) } },
-          { label: '重命名', onClick: () => renameFolder(sCtx.space) },
-          { label: '新建知识空间', onClick: () => setNewSpaceOpen(true) },
-          { label: '删除', onClick: () => deleteFolder(sCtx.space), danger: true },
+          ...(canCreateFolder ? [
+            { label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, sCtx.space.id) } },
+            { label: '新建知识空间', onClick: () => setNewSpaceOpen(true) },
+          ] : []),
+          ...(canEditFolder ? [{ label: '重命名', onClick: () => renameFolder(sCtx.space) }] : []),
+          ...(canDeleteFolder ? [{ label: '删除', onClick: () => deleteFolder(sCtx.space), danger: true }] : []),
         ]} />
       )}
       {fCtx && (
         <ContextMenu x={fCtx.x} y={fCtx.y} onClose={() => setFCtx(null)} items={[
-          { label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, fCtx.folder.id) } },
-          { label: '重命名', onClick: () => renameFolder(fCtx.folder) },
-          { label: '删除', onClick: () => deleteFolder(fCtx.folder), danger: true },
+          ...(canCreateFolder ? [{ label: '新建子文件夹', onClick: () => { const n = prompt('文件夹名称:'); if (n) createFolder(n, fCtx.folder.id) } }] : []),
+          ...(canEditFolder ? [{ label: '重命名', onClick: () => renameFolder(fCtx.folder) }] : []),
+          ...(canDeleteFolder ? [{ label: '删除', onClick: () => deleteFolder(fCtx.folder), danger: true }] : []),
         ]} />
       )}
 
@@ -601,7 +631,7 @@ function DocumentsContent() {
               {upStatus === 'done' ? (
                 <>
                   <button type="button" onClick={() => { setShowUpload(false); resetUpload() }} className="flex-1 px-4 py-2 bg-[#2563EB] text-white text-[0.82rem] rounded-lg hover:bg-blue-600">完成</button>
-                  {upDoc && <button type="button" onClick={() => setShowAi(true)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">AI 解析</button>}
+                  {upDoc && canAnalyzeDocument && <button type="button" onClick={() => setShowAi(true)} className="flex-1 px-4 py-2 border border-neutral-200 rounded-lg text-[0.82rem] hover:bg-neutral-50">AI 解析</button>}
                 </>
               ) : (
                 <>
