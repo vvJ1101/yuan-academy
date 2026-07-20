@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
   // Resolve popular
   const popIds = popularIds.map(g => g.documentId).filter(Boolean) as string[]
   const popDocs = popIds.length > 0 ? await prisma.document.findMany({
-    where: { id: { in: popIds } },
+    where: { AND: [{ id: { in: popIds } }, where] },
     select: { id: true, title: true, slug: true, category: true, ownerDept: { select: { name: true } },
       audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
   }) : []
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 
   if (recentDocIds.length > 0) {
     const recentDocs = await prisma.document.findMany({
-      where: { id: { in: recentDocIds.slice(0, 3) } },
+      where: { AND: [{ id: { in: recentDocIds.slice(0, 3) } }, where] },
       select: { id: true, title: true, category: true, ownerDept: { select: { name: true } } },
     })
     for (const d of recentDocs) {

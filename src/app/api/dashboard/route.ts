@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
   if (popularDocIds.length > 0) {
     const ids = popularDocIds.map((g: any) => g.documentId).filter(Boolean) as string[]
     const docs = await prisma.document.findMany({
-      where: { id: { in: ids } },
+      where: { AND: [{ id: { in: ids } }, docWhere] },
       select: {
         id: true, title: true, slug: true, category: true,
         ownerDept: { select: { name: true, slug: true } },

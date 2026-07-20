@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { canReadDocument } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 /** GET /api/documents/[id]/history — list edit history for a document */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'document.historyView', '你没有查看文档历史记录的权限')
+  if (!guard.ok) return guard.response
+
+  const activeSession = session!
 
   // Verify user can read this document
   const doc = await prisma.document.findUnique({
@@ -17,7 +21,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (!canReadDocument(session, doc as any)) {
+  if (!canReadDocument(activeSession, doc as any)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

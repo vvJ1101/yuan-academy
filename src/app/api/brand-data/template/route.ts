@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookies } from '@/lib/auth'
 import { getContactView } from '@/lib/brand-data-access'
 import { getBrandTemplatePath } from '@/lib/brand-data-store'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -10,6 +11,9 @@ export const runtime = 'nodejs'
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: '请先登录' }, { status: 401 })
+
+  const uploadGuard = await requirePermission(session, 'brandContact.upload', '无权下载品牌对接信息上传模板')
+  if (!uploadGuard.ok) return uploadGuard.response
 
   const type = new URL(req.url).searchParams.get('type') || 'contact'
   if (type !== 'contact') return NextResponse.json({ error: '资料类型无效' }, { status: 400 })
