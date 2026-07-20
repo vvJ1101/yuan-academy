@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { access } from 'node:fs/promises'
 import { getSessionFromCookies, prisma } from '@/lib/auth'
 import { processDocumentFile } from '@/lib/document-processor'
-import { getOriginalFilePath, validateUploadFile } from '@/lib/document-files'
+import { getOriginalFilePath, resolveStoredDocumentFileMeta, validateUploadFile } from '@/lib/document-files'
 import { logUpload } from '@/lib/audit'
 import { buildDocumentWhere, canUploadToFolder } from '@/lib/permissions/documents'
 import { getFolderPermission, getFolderPermissionsForDocuments } from '@/lib/permissions/folders'
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
   })
 
   const folderPermissions = await getFolderPermissionsForDocuments(session, docs.map(doc => doc.folderId))
-  const withMeta = docs.map(doc => {
+  const withMeta = await Promise.all(docs.map(async doc => {
     let summary = doc.condensedContent.match(/^> (.+)/m)?.[1]?.trim() ?? ''
     if (!summary && doc.fullContent) summary = doc.fullContent.replace(/[#*>\n]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 80)
     const userPermission = resolveDocumentPermission(
@@ -49,9 +49,15 @@ export async function GET(req: NextRequest) {
       doc,
       doc.folderId ? folderPermissions.get(doc.folderId) ?? null : null,
     )
+    const fileMeta = await resolveStoredDocumentFileMeta({
+      docId: doc.id,
+      fileType: doc.fileType,
+      fileSize: doc.fileSize,
+      originalFileName: doc.originalFileName,
+    })
     const { condensedContent, fullContent, documentPermissions: _documentPermissions, overridePermissions: _overridePermissions, ...rest } = doc
-    return { ...rest, summary, userPermission, hasAiSummary: Boolean(condensedContent) }
-  })
+    return { ...rest, ...fileMeta, summary, userPermission, hasAiSummary: Boolean(condensedContent) }
+  }))
 
   return NextResponse.json(withMeta)
 }

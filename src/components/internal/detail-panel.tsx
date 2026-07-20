@@ -12,6 +12,7 @@ interface Doc {
   audiences?: { department?: { name: string; slug: string } }[]
   folder?: { id: string; name: string } | null
   updatedAt: string; author: { name: string }
+  fileType?: string | null
   fileSize?: number | null
 }
 
@@ -25,7 +26,7 @@ function fmtTime(iso?: string) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 }
 function fmtSize(doc: Doc): string {
-  if (doc.fileSize) {
+  if (typeof doc.fileSize === 'number' && doc.fileSize > 0) {
     const b = doc.fileSize
     if (b < 1024) return `${b} B`
     if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`
@@ -55,6 +56,31 @@ function getTags(doc: Doc): string[] {
   return tags
 }
 
+function getDisplayFileType(doc: Doc): 'excel' | 'word' | 'pdf' | 'ppt' | 'other' {
+  const fileType = doc.fileType?.toLowerCase()
+  if (fileType === 'xlsx' || fileType === 'xls') return 'excel'
+  if (fileType === 'docx') return 'word'
+  if (fileType === 'pptx' || fileType === 'ppt') return 'ppt'
+  if (fileType === 'pdf') return 'pdf'
+  return guessType(doc.title, doc.category)
+}
+
+function getDisplayFileTypeLabel(fileType: ReturnType<typeof getDisplayFileType>): string {
+  if (fileType === 'excel') return 'Excel'
+  if (fileType === 'word') return 'Word'
+  if (fileType === 'ppt') return 'PPT'
+  if (fileType === 'pdf') return 'PDF'
+  return '文档'
+}
+
+function getDisplayFileTypeIcon(fileType: ReturnType<typeof getDisplayFileType>): string | null {
+  if (fileType === 'excel') return '/images/excel.png'
+  if (fileType === 'word') return '/images/word.png'
+  if (fileType === 'ppt') return '/images/ppt.png'
+  if (fileType === 'pdf') return '/images/pdf.png'
+  return null
+}
+
 export function DetailPanel({ doc, onClose }: { doc: Doc | null; onClose: () => void }) {
   const [aiExpanded, setAiExpanded] = useState(false)
 
@@ -70,11 +96,9 @@ export function DetailPanel({ doc, onClose }: { doc: Doc | null; onClose: () => 
     )
   }
 
-  const fileType = guessType(doc.title, doc.category)
-  const fileTypeLabel = fileType === 'excel' ? 'Excel' : fileType === 'word' ? 'Word' : fileType === 'pdf' ? 'PDF' : '文档'
-  const fileTypeIcon = fileType === 'excel' ? '/images/excel.png'
-    : fileType === 'word' ? '/images/word.png'
-    : fileType === 'pdf' ? '/images/pdf.png' : null
+  const fileType = getDisplayFileType(doc)
+  const fileTypeLabel = getDisplayFileTypeLabel(fileType)
+  const fileTypeIcon = getDisplayFileTypeIcon(fileType)
   const deptSlug = doc.audiences?.[0]?.department?.slug || doc.ownerDept?.slug || 'doc'
 
   return (

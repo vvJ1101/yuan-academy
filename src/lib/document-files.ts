@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 
 export type DocumentFileType = 'pdf' | 'ppt' | 'pptx' | 'xls' | 'xlsx' | 'docx'
@@ -33,6 +34,8 @@ const MIME_BY_FILE_TYPE: Record<DocumentFileType, string> = {
 const SUPPORTED_FILE_TYPES = new Set<DocumentFileType>(
   Object.keys(MIME_BY_FILE_TYPE) as DocumentFileType[],
 )
+
+const ORIGINAL_FILE_TYPES: DocumentFileType[] = ['pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'docx']
 
 export function validateUploadFile(file: UploadFileInput): ValidatedUpload {
   const originalFileName = basename(file.name)
@@ -81,6 +84,62 @@ export function getOriginalFilePath(docId: string, fileType: DocumentFileType): 
 
 export function getPreviewFilePath(docId: string): string {
   return join(getDocumentDirectory(docId), 'preview.pdf')
+}
+
+export function isDocumentFileType(fileType: string | null | undefined): fileType is DocumentFileType {
+  return SUPPORTED_FILE_TYPES.has(fileType as DocumentFileType)
+}
+
+interface ResolveStoredDocumentFileMetaInput {
+  docId: string
+  fileType?: string | null
+  fileSize?: number | null
+  originalFileName?: string | null
+  root?: string
+}
+
+interface ResolvedStoredDocumentFileMeta {
+  fileType: DocumentFileType | null
+  fileSize: number
+  originalFileName: string
+}
+
+export async function resolveStoredDocumentFileMeta(
+  input: ResolveStoredDocumentFileMetaInput,
+): Promise<ResolvedStoredDocumentFileMeta> {
+  const storedFileType = isDocumentFileType(input.fileType) ? input.fileType : null
+  const storedFileSize = Number.isSafeInteger(input.fileSize) && (input.fileSize ?? 0) > 0 ? input.fileSize as number : 0
+  const originalFileName = input.originalFileName?.trim() ?? ''
+
+  if (storedFileType && storedFileSize > 0) {
+    return { fileType: storedFileType, fileSize: storedFileSize, originalFileName }
+  }
+
+  const root = input.root ?? process.cwd()
+  const baseDirs = [
+    join(root, 'data', 'private', 'documents', input.docId),
+    join(root, 'public', 'uploads', 'documents', input.docId),
+  ]
+
+  for (const dir of baseDirs) {
+    for (const fileType of ORIGINAL_FILE_TYPES) {
+      const name = `original.${fileType}`
+      try {
+        const file = await stat(join(dir, name))
+        if (file.isFile()) {
+          return {
+            fileType,
+            fileSize: file.size,
+            originalFileName: originalFileName || name,
+          }
+        }
+      } catch {
+        // Try the next supported original file name.
+      }
+    }
+  }
+
+  return { fileType: storedFileType, fileSize: storedFileSize, originalFileName }
 }
 
 export function canDownloadPermission(permission: DocumentPermission | null): boolean {
