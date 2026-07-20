@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import * as XLSX from 'xlsx'
 
-import { countSheetMatches, findDefaultSheetIndex, workbookToPreview } from '../excel-preview'
+import { countSheetMatches, EXCEL_PREVIEW_LIMITS, findDefaultSheetIndex, workbookToPreview } from '../excel-preview'
 
 function createWorkbookBuffer(
   sheets: Array<{ name: string; rows: unknown[][] }>,
@@ -99,6 +99,20 @@ test('supports legacy XLS workbooks', () => {
 test('returns a Chinese error for corrupt or unsupported input', () => {
   assert.throws(
     () => workbookToPreview(Buffer.from('not an excel workbook')),
+    (error: unknown) => error instanceof Error
+      && error.message === 'Excel 文件可能已损坏或格式不受支持',
+  )
+})
+
+test('rejects oversized browser previews before workbook parsing', () => {
+  const oversizedZipLike = Buffer.alloc(EXCEL_PREVIEW_LIMITS.maxPreviewBytes + 1)
+  oversizedZipLike[0] = 0x50
+  oversizedZipLike[1] = 0x4b
+  oversizedZipLike[2] = 0x03
+  oversizedZipLike[3] = 0x04
+
+  assert.throws(
+    () => workbookToPreview(oversizedZipLike),
     (error: unknown) => error instanceof Error
       && error.message === 'Excel 文件可能已损坏或格式不受支持',
   )

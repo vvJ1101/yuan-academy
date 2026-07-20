@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Download, Loader2, Search, Upload } from 'lucide-react'
+import { AlertCircle, Download, Loader2, Printer, Search, Upload } from 'lucide-react'
 
 import type { Permission } from '@/lib/permissions/folders'
 import {
@@ -34,7 +34,7 @@ export function ExcelReader({ documentId, title, permission, fileType, onReplace
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
-  const [downloading, setDownloading] = useState(false)
+  const [busyAction, setBusyAction] = useState<'download' | 'print' | null>(null)
   const [replacing, setReplacing] = useState(false)
   const [replacementFile, setReplacementFile] = useState<File | null>(null)
   const [recoveryMessage, setRecoveryMessage] = useState('')
@@ -95,12 +95,22 @@ export function ExcelReader({ documentId, title, permission, fileType, onReplace
     () => countSheetMatches(activeSheet, query),
     [activeSheet, query],
   )
-  const canDownload = getReaderActions(permission).download
+  const actions = getReaderActions(permission)
+  const canDownload = actions.download
+  const canPrint = actions.print
+
+  const escapePrintCell = (value: string): string => value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;',
+  })[character] as string)
 
   const downloadOriginal = async () => {
     const manager = exportManagerRef.current!
     const signal = manager.begin()
-    setDownloading(true)
+    setBusyAction('download')
     setActionError('')
     try {
       const response = await fetch(buildReaderFileUrl(documentId, 'download'), {
@@ -124,7 +134,70 @@ export function ExcelReader({ documentId, title, permission, fileType, onReplace
         setActionError(error instanceof Error ? error.message : '下载失败，请稍后重试')
       }
     } finally {
-      if (mountedRef.current) setDownloading(false)
+      if (mountedRef.current) setBusyAction(null)
+    }
+  }
+
+  const printCurrentSheet = async () => {
+    if (!activeSheet) return
+    const manager = exportManagerRef.current!
+    const signal = manager.begin()
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.opener = null
+      manager.trackPopup(printWindow)
+    }
+    setBusyAction('print')
+    setActionError('')
+    try {
+      if (!printWindow) throw new Error('浏览器阻止了打印窗口，请允许弹出窗口后重试')
+      const response = await fetch(buildReaderFileUrl(documentId, 'print'), {
+        credentials: 'same-origin',
+        headers: { Range: 'bytes=0-0' },
+        signal,
+      })
+      if (response.status === 403) throw new Error('你没有下载或打印权限')
+      if (!response.ok && response.status !== 206) throw new Error('打印文件读取失败，请稍后重试')
+      const headerCells = activeSheet.rows[0] ?? []
+      const bodyRows = activeSheet.rows.slice(1)
+      const tableHead = headerCells.map((cell, index) => (
+        `<th>${escapePrintCell(cell || `列 ${index + 1}`)}</th>`
+      )).join('')
+      const tableBody = bodyRows.map((row) => (
+        `<tr>${row.map((cell) => `<td>${escapePrintCell(cell)}</td>`).join('')}</tr>`
+      )).join('')
+      printWindow.document.open()
+      printWindow.document.write(`<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>${escapePrintCell(title)} - ${escapePrintCell(activeSheet.name)}</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; color: #171717; }
+h1 { font-size: 18px; margin: 0 0 6px; }
+p { margin: 0 0 16px; color: #525252; font-size: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 11px; }
+th, td { border: 1px solid #d4d4d4; padding: 6px; text-align: left; vertical-align: top; word-break: break-word; }
+th { background: #f5f5f5; }
+</style>
+</head>
+<body>
+<h1>${escapePrintCell(title)}</h1>
+<p>Sheet：${escapePrintCell(activeSheet.name)}；当前打印网页预览内容。</p>
+<table><thead><tr>${tableHead}</tr></thead><tbody>${tableBody}</tbody></table>
+</body>
+</html>`)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+      manager.deferCleanup(60_000, { closePopup: false })
+    } catch (error) {
+      manager.cleanup()
+      if (mountedRef.current && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setActionError(error instanceof Error ? error.message : '打印文件读取失败，请稍后重试')
+      }
+    } finally {
+      if (mountedRef.current) setBusyAction(null)
     }
   }
 
@@ -200,11 +273,11 @@ export function ExcelReader({ documentId, title, permission, fileType, onReplace
             <button
               type="button"
               onClick={() => void downloadOriginal()}
-              disabled={downloading}
+              disabled={busyAction !== null}
               className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-amber-800 px-4 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-50"
             >
-              {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {downloading ? '下载中…' : '下载原文件'}
+              {busyAction === 'download' ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {busyAction === 'download' ? '下载中…' : '下载原文件'}
             </button>
           </div>
         )}
@@ -258,11 +331,22 @@ export function ExcelReader({ documentId, title, permission, fileType, onReplace
             <button
               type="button"
               onClick={() => void downloadOriginal()}
-              disabled={downloading}
+              disabled={busyAction !== null}
               className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
             >
-              {downloading ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-              {downloading ? '下载中…' : '下载原文件'}
+              {busyAction === 'download' ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+              {busyAction === 'download' ? '下载中…' : '下载原文件'}
+            </button>
+          )}
+          {canPrint && (
+            <button
+              type="button"
+              onClick={() => void printCurrentSheet()}
+              disabled={busyAction !== null}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+            >
+              {busyAction === 'print' ? <Loader2 className="size-4 animate-spin" /> : <Printer className="size-4" />}
+              {busyAction === 'print' ? '准备打印…' : '打印当前 Sheet'}
             </button>
           )}
         </div>

@@ -24,6 +24,7 @@ export const EXCEL_PREVIEW_LIMITS = {
   maxColumns: 100,
   maxSheets: 20,
   maxTotalCells: 100_000,
+  maxPreviewBytes: 25 * 1024 * 1024,
 } as const
 
 export function findDefaultSheetIndex(workbook: WorkbookPreview): number {
@@ -77,7 +78,8 @@ function toDisplayRows(
     }
   }
 
-  const sourceRange = XLSX.utils.decode_range(worksheet['!ref'])
+  const fullReference = (worksheet as XLSX.WorkSheet & { '!fullref'?: string })['!fullref']
+  const sourceRange = XLSX.utils.decode_range(fullReference || worksheet['!ref'])
   const originalRowCount = sourceRange.e.r - sourceRange.s.r + 1
   const originalColumnCount = sourceRange.e.c - sourceRange.s.c + 1
   const previewColumnCount = Math.min(originalColumnCount, EXCEL_PREVIEW_LIMITS.maxColumns)
@@ -150,6 +152,7 @@ export function workbookToPreview(
     const maxRows = Math.min(requestedMaxRows, EXCEL_PREVIEW_LIMITS.maxRows)
     const data = input instanceof Uint8Array ? input : new Uint8Array(input)
     if (!isExcelContainer(data)) throw new Error(CORRUPT_FILE_MESSAGE)
+    if (data.byteLength > EXCEL_PREVIEW_LIMITS.maxPreviewBytes) throw new Error(CORRUPT_FILE_MESSAGE)
 
     const workbook = XLSX.read(data, {
       type: 'array',
@@ -159,6 +162,7 @@ export function workbookToPreview(
       bookFiles: false,
       bookProps: false,
       bookVBA: false,
+      sheetRows: maxRows + 1,
     })
     if (workbook.SheetNames.length === 0) throw new Error(CORRUPT_FILE_MESSAGE)
 
