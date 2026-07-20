@@ -16,14 +16,31 @@ import { permissionApi } from '@/api/permission'
 import { deptApi } from '@/api/dept'
 import type { RoleVO, MenuNode, UserVO, DataScopeType } from '@/types/role-management'
 import { DATA_SCOPE_LABELS } from '@/types/role-management'
+import {
+  PERMISSION_MODULES,
+  PERMISSION_TEMPLATES,
+  buildPermissionSummary,
+  collectPermissionIdsByKeys,
+  filterPermissionTree,
+  getPermissionModuleKey,
+  getRiskLevel,
+  type PermissionModuleKey,
+} from './permission-groups'
 
 // ── Convert menu tree to Ant Design Tree nodes ──
 function toTreeNodes(menus: MenuNode[]): DataNode[] {
+  const riskColor = { high: 'red', medium: 'gold', none: 'default' } as const
   return menus.map(m => ({
     key: m.id,
     title: (
       <span>
         {m.name}
+        {getRiskLevel(m.permission) !== 'none' && (
+          <Tag color={riskColor[getRiskLevel(m.permission)]}
+            style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+            {getRiskLevel(m.permission) === 'high' ? '高危' : '敏感'}
+          </Tag>
+        )}
         {m.type && (
           <Tag color={m.type === 3 ? 'blue' : m.type === 2 ? 'green' : 'orange'}
             style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
@@ -65,9 +82,12 @@ function getAllKeys(nodes: DataNode[]): string[] {
   const [permOpen, setPermOpen] = useState(false)
   const [permRoleId, setPermRoleId] = useState('')
   const [permTree, setPermTree] = useState<DataNode[]>([])
+  const [permMenuTree, setPermMenuTree] = useState<MenuNode[]>([])
   const [permChecked, setPermChecked] = useState<string[]>([])
   const [permSaving, setPermSaving] = useState(false)
   const [permExpandAll, setPermExpandAll] = useState(true)
+  const [activePermissionModule, setActivePermissionModule] = useState<PermissionModuleKey>('brand')
+  const [permissionSearch, setPermissionSearch] = useState('')
 
   // Data scope modal
   const [scopeOpen, setScopeOpen] = useState(false)
@@ -117,6 +137,26 @@ function getAllKeys(nodes: DataNode[]): string[] {
         return a.localeCompare(b, 'zh-CN')
       })
   }, [allUsers])
+
+  const visiblePermissionMenus = useMemo(() => {
+    const moduleNodes = permMenuTree.filter(node => getPermissionModuleKey(node) === activePermissionModule)
+    return filterPermissionTree(moduleNodes.length > 0 ? moduleNodes : permMenuTree, permissionSearch)
+  }, [activePermissionModule, permMenuTree, permissionSearch])
+
+  const visiblePermissionTree = useMemo(() => toTreeNodes(visiblePermissionMenus), [visiblePermissionMenus])
+
+  const selectedSummary = useMemo(() => buildPermissionSummary(permMenuTree, permChecked), [permMenuTree, permChecked])
+
+  const selectedHighRiskCount = useMemo(() => {
+    const ids = new Set(permChecked)
+    function count(nodes: MenuNode[]): number {
+      return nodes.reduce((total, node) => {
+        const self = ids.has(node.id) && getRiskLevel(node.permission) === 'high' ? 1 : 0
+        return total + self + count(node.children || [])
+      }, 0)
+    }
+    return count(permMenuTree)
+  }, [permChecked, permMenuTree])
 
   // ── Load roles ──
   const loadRoles = useCallback(async (page = 1, name?: string) => {
@@ -188,7 +228,10 @@ function getAllKeys(nodes: DataNode[]): string[] {
         permissionApi.getTree(),
         roleApi.getPermissions(r.id),
       ])
-      if (treeRes.code === 0) setPermTree(toTreeNodes(treeRes.data))
+      if (treeRes.code === 0) {
+        setPermMenuTree(treeRes.data)
+        setPermTree(toTreeNodes(treeRes.data))
+      }
       if (permRes.code === 0) setPermChecked(permRes.data)
     } catch { message.error('加载权限数据失败') }
   }
@@ -209,6 +252,8 @@ function getAllKeys(nodes: DataNode[]): string[] {
     setUsersRoleId(r.id)
     setUsersRoleName(r.name)
     setConfigTab('permissions')
+    setActivePermissionModule('brand')
+    setPermissionSearch('')
     setConfigOpen(true)
     setPermExpandAll(true)
     setConfigLoading(true)
@@ -219,7 +264,10 @@ function getAllKeys(nodes: DataNode[]): string[] {
         deptApi.getTree(),
         fetch(`/api/admin/roles/${r.id}/dataScope`).then(res => res.json()),
       ])
-      if (treeRes.code === 0) setPermTree(toTreeNodes(treeRes.data))
+      if (treeRes.code === 0) {
+        setPermMenuTree(treeRes.data)
+        setPermTree(toTreeNodes(treeRes.data))
+      }
       if (permRes.code === 0) setPermChecked(permRes.data)
       if (deptRes.code === 0) setDeptTree(toTreeNodes(deptRes.data))
       if (scopeRes.code === 0) {
@@ -239,6 +287,7 @@ function getAllKeys(nodes: DataNode[]): string[] {
   const handleSaveConfig = async () => {
     if (!configRole) return
     if (scopeValue === 'ALL' && !window.confirm('该角色将拥有授权模块下的全部数据范围，确定保存？')) return
+    if (selectedHighRiskCount > 0 && !window.confirm(`当前角色包含 ${selectedHighRiskCount} 个高危权限，确定保存？`)) return
     setConfigSaving(true)
     try {
       const [permRes, scopeRes]: any[] = await Promise.all([
@@ -422,30 +471,112 @@ function getAllKeys(nodes: DataNode[]): string[] {
                   type="warning"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="建议先勾页面入口，再勾对应按钮"
-                  description="例如：要允许删除用户，应同时拥有“用户管理”页面入口和“删除用户”按钮权限；后续会继续增加依赖自动补全。"
+                  message="按业务模块配置权限"
+                  description="左侧先选择模块，中间勾页面和按钮，右侧会用人话解释当前角色最终能做什么。建议先勾页面入口，再勾对应按钮。"
                 />
-                <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                  <Space>
-                    <Button size="small" onClick={() => setPermExpandAll(!permExpandAll)}>
-                      {permExpandAll ? '收起全部' : '展开全部'}
-                    </Button>
-                    <Button size="small" onClick={() => {
-                      const allKeys = getAllKeys(permTree)
-                      setPermChecked(permChecked.length === allKeys.length ? [] : allKeys)
-                    }}>{permChecked.length === getAllKeys(permTree).length ? '取消全选' : '全选'}</Button>
-                  </Space>
-                  <span style={{ fontSize: 12, color: '#666' }}>已选择 {permChecked.length} 个权限节点</span>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(150px, 180px) minmax(320px, 1fr) minmax(220px, 260px)',
+                  gap: 12,
+                  alignItems: 'start',
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {PERMISSION_MODULES.map(module => (
+                      <button
+                        key={module.key}
+                        type="button"
+                        onClick={() => setActivePermissionModule(module.key)}
+                        style={{
+                          minHeight: 44,
+                          textAlign: 'left',
+                          borderRadius: 10,
+                          border: activePermissionModule === module.key ? '1px solid #2563eb' : '1px solid #e5e7eb',
+                          background: activePermissionModule === module.key ? '#eff6ff' : '#fff',
+                          color: activePermissionModule === module.key ? '#1d4ed8' : '#374151',
+                          padding: '9px 10px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{module.label}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{module.description}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ border: '1px solid #f0f0f0', borderRadius: 12, padding: 12, background: '#fff' }}>
+                    <Input.Search
+                      placeholder="搜索权限，例如：品牌对接、市场字段、删除"
+                      value={permissionSearch}
+                      onChange={event => setPermissionSearch(event.target.value)}
+                      allowClear
+                      style={{ marginBottom: 12 }}
+                    />
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>应用推荐模板</div>
+                      <Space wrap>
+                        {Object.entries(PERMISSION_TEMPLATES).map(([key, template]) => (
+                          <Button
+                            key={key}
+                            size="small"
+                            onClick={() => {
+                              const ids = collectPermissionIdsByKeys(permMenuTree, template.keys)
+                              setPermChecked(Array.from(new Set([...permChecked, ...ids])))
+                              message.success(`已应用${template.label}`)
+                            }}
+                          >
+                            {template.label}
+                          </Button>
+                        ))}
+                      </Space>
+                    </div>
+                    <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <Space>
+                        <Button size="small" onClick={() => setPermExpandAll(!permExpandAll)}>
+                          {permExpandAll ? '收起全部' : '展开全部'}
+                        </Button>
+                        <Button size="small" onClick={() => {
+                          const visibleKeys = getAllKeys(visiblePermissionTree)
+                          const everyVisibleChecked = visibleKeys.length > 0 && visibleKeys.every(key => permChecked.includes(key))
+                          setPermChecked(everyVisibleChecked
+                            ? permChecked.filter(key => !visibleKeys.includes(key))
+                            : Array.from(new Set([...permChecked, ...visibleKeys])))
+                        }}>选择当前模块</Button>
+                      </Space>
+                      <span style={{ fontSize: 12, color: '#666' }}>已选择 {permChecked.length} 个权限节点</span>
+                    </div>
+                    <Tree key={`${activePermissionModule}-${permissionSearch}-${permExpandAll ? 'e' : 'c'}`} checkable checkStrictly defaultExpandAll={permExpandAll}
+                      checkedKeys={permChecked}
+                      onCheck={(keys) => {
+                        const rawKeys = Array.isArray(keys) ? keys : keys.checked
+                        setPermChecked(rawKeys.map(String))
+                      }}
+                      treeData={visiblePermissionTree}
+                      style={{ maxHeight: 440, overflow: 'auto' }}
+                    />
+                  </div>
+
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#f9fafb' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 8 }}>已选权限摘要</div>
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      {selectedSummary.map(item => (
+                        <div key={item} style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>• {item}</div>
+                      ))}
+                    </Space>
+                    {selectedHighRiskCount > 0 && (
+                      <Alert
+                        style={{ marginTop: 12 }}
+                        type="warning"
+                        showIcon
+                        message={`包含 ${selectedHighRiskCount} 个高危权限`}
+                        description="保存前请确认这些权限确实需要，例如删除、完整字段导出、系统设置或角色分配。"
+                      />
+                    )}
+                    <Divider style={{ margin: '12px 0' }} />
+                    <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.6 }}>
+                      小提示：模板只是批量勾选建议，不会锁死角色。最终仍以你保存时勾选的权限为准。
+                    </div>
+                  </div>
                 </div>
-                <Tree key={permExpandAll ? 'config-e' : 'config-c'} checkable checkStrictly defaultExpandAll={permExpandAll}
-                  checkedKeys={permChecked}
-                  onCheck={(keys) => {
-                    const rawKeys = Array.isArray(keys) ? keys : keys.checked
-                    setPermChecked(rawKeys.map(String))
-                  }}
-                  treeData={permTree}
-                  style={{ maxHeight: 440, overflow: 'auto', padding: 12, border: '1px solid #f0f0f0', borderRadius: 8 }}
-                />
               </div>
             ),
           },
