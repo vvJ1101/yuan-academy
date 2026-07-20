@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useRef } from 'react'
 import { Folder, Home, Clock, Star, Upload, ChevronDown, ChevronRight, Layout, Wrench, Loader2, ScrollText } from 'lucide-react'
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
@@ -15,13 +15,17 @@ const QUICK_LINKS = [
   { href: '/internal/recent', label: '最近访问', Icon: Clock, perm: 'menu.recent', permKey: 'menu.recent' },
   { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'menu.favorites' },
   { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'menu.documents' },
-  { href: '/internal/policy', label: '订货政策', Icon: ScrollText, permKey: 'menu.policy' },
-  { href: '/internal/policy-upload', label: '政策上传', Icon: Upload, permKey: 'menu.policyUpload' },
   { href: '/internal/admin', label: '管理中心', Icon: Wrench, perm: 'menu.admin', permKey: 'admin' },
+]
+
+const BRAND_LINKS = [
+  { href: '/internal/brand?type=ordering', label: '订货政策', permKey: 'menu.brand.ordering', type: 'ordering' },
+  { href: '/internal/brand?type=contact', label: '品牌对接信息', permKey: 'menu.brand.contact', type: 'contact' },
 ]
 
 export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname() || ''
+  const searchParams = useSearchParams()
   const router = useRouter()
   const [folders, setFolders] = useState<FolderItem[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -44,11 +48,15 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [renameSaving, setRenameSaving] = useState(false)
 
   const [userPerms, setUserPerms] = useState<string[]>(['*'])
+  const [departmentName, setDepartmentName] = useState('')
   const [permList, setPermList] = useState<string[]>(['*'])
   const [folderPerms, setFolderPerms] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.permissions) setUserPerms(u.permissions) }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/auth/me').then(r=>r.json()).then(u=>{
+      if(u?.permissions) setUserPerms(u.permissions)
+      if(u?.departmentName) setDepartmentName(u.departmentName)
+    }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch((err: any) => console.warn("[SilentError]", err))
 
     fetch('/api/folders').then(r => r.json()).then(d => {
@@ -238,6 +246,19 @@ function PermBadge({ perm }: { perm: string }) {
   const isReal = (fid: string) => fid !== 'yuan-root' && fid !== 'yuan-group' && !fid.startsWith('company-')
 
   const navCls = (href: string) => isActive(href) ? 'flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] no-underline cursor-pointer bg-[#EBF5FF] text-[#2563EB] font-medium' : 'flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] no-underline cursor-pointer text-neutral-600 hover:bg-neutral-50'
+  const canSeePermission = (permKey?: string) => {
+    if (!permKey) return true
+    if (userPerms.includes('*') || permList.includes('*')) return true
+    if (permList.includes(permKey)) return true
+    if (permKey === 'admin' && permList.some(p => p.startsWith('admin:'))) return true
+    if (permKey === 'menu.brand' && permList.some(p => p.startsWith('menu.brand.'))) return true
+    if (permKey.startsWith('menu.brand.') && (departmentName === '商品部' || departmentName === '市场部')) return true
+    return false
+  }
+  const visibleBrandLinks = BRAND_LINKS.filter(link => canSeePermission(link.permKey) || canSeePermission('menu.brand'))
+  const brandOpen = pathname === '/internal/brand' || pathname.startsWith('/internal/brand/')
+  const brandExpanded = brandOpen || expanded.has('brand-data')
+  const activeBrandType = pathname === '/internal/brand' ? (searchParams.get('type') || 'contact') : ''
 
   return (
     <aside className="w-[260px] h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden">
@@ -254,17 +275,45 @@ function PermBadge({ perm }: { perm: string }) {
       {/* Quick links */}
       <div className="shrink-0 py-2">
         <div className="px-3 mb-2">
-          {QUICK_LINKS.filter(l => {
-            if (!l.permKey) return true
-            if (userPerms.includes('*') || permList.includes('*')) return true
-            if (permList.includes(l.permKey)) return true
-            if (l.permKey === 'admin' && permList.some(p => p.startsWith('admin:'))) return true
-            return false
-          }).map(l => (
+          {QUICK_LINKS.filter(l => canSeePermission(l.permKey)).map(l => (
             <Link key={l.href} href={l.href} onClick={handleNav} className={navCls(l.href)}>
               <l.Icon size={16} strokeWidth={1.5} /><span>{l.label}</span>
             </Link>
           ))}
+          {visibleBrandLinks.length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => toggle('brand-data')}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] text-neutral-700 ${brandOpen ? 'bg-neutral-50' : 'hover:bg-neutral-50'}`}
+              >
+                <ScrollText size={16} strokeWidth={1.5} />
+                <span className="font-medium">品牌资料</span>
+                <ChevronDown size={13} strokeWidth={2} className={`ml-auto transition-transform ${brandExpanded ? '' : '-rotate-90'}`} />
+              </button>
+              {brandExpanded && (
+                <div className="ml-6 mt-1 space-y-0.5 border-l border-neutral-100 pl-2">
+                  {visibleBrandLinks.map(link => {
+                    const active = activeBrandType === link.type
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        onClick={handleNav}
+                        className={`block rounded-lg px-3 py-1.5 text-[0.76rem] no-underline ${
+                          active
+                            ? 'bg-[#EBF5FF] text-[#2563EB] font-medium'
+                            : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'
+                        }`}
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="mx-3 border-t border-neutral-100 mb-2" />
         <div className="px-3">

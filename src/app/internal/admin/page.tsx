@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Folder, Users, BookOpen, BarChart3, GraduationCap, MessageSquare, Wrench, Building2, Upload, Shield, Clock } from 'lucide-react'
+import { Folder, Users, BookOpen, BarChart3, GraduationCap, MessageSquare, Wrench, Building2, Shield, Clock } from 'lucide-react'
 import { PageHeader } from '@/components/internal/page-header'
 
 const adminCards = [
@@ -12,7 +12,7 @@ const adminCards = [
   { href: '/internal/admin/analytics', icon: BarChart3, title: '数据分析', desc: '跨部门访问统计与使用分析', color: 'bg-purple-50 border-purple-100' },
   { href: '/internal/admin/learning-paths', icon: GraduationCap, title: '学习路径', desc: '创建与管理部门学习计划', color: 'bg-amber-50 border-amber-100' },
   { href: '/internal/faq', icon: MessageSquare, title: 'FAQ 管理', desc: '常见问题增删改查', color: 'bg-rose-50 border-rose-100' },
-  { href: '/internal/policy-upload', icon: Upload, title: '政策更新', desc: '品牌订货政策上传与更新', color: 'bg-teal-50 border-teal-100' },
+  { href: '/internal/brand?type=contact', icon: Building2, title: '品牌资料', desc: '品牌对接信息与资料维护', color: 'bg-teal-50 border-teal-100' },
   { href: '/internal/admin/role-permissions', icon: Shield, title: '角色权限', desc: '角色管理与权限分配', color: 'bg-violet-50 border-violet-100' },
   { href: '/internal/admin/settings', icon: Wrench, title: '系统设置', desc: '基础配置与维护', color: 'bg-gray-50 border-gray-200' },
   { href: '/internal/admin/audit-log', icon: Clock, title: '审计日志', desc: '用户操作与系统变更记录', color: 'bg-sky-50 border-sky-100' },
