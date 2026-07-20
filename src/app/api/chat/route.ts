@@ -4,6 +4,8 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { cacheKey, getCached, setCache } from '@/lib/ai-cache'
+import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 const DB_PATH = path.join(process.cwd(), 'prisma', 'dev.db')
 const MAX_PER_HOUR = 30
@@ -65,9 +67,14 @@ function extractExcerpt(content: string, question: string, maxLen = 200): string
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id) return new Response('Unauthorized', { status: 401 })
+  const guard = await requirePermission(session, 'ai.chat', '你没有使用 AI 对话的权限')
+  if (!guard.ok) return new Response(JSON.stringify({ error: session?.id ? '你没有使用 AI 对话的权限' : '请先登录' }), {
+    status: session?.id ? 403 : 401,
+    headers: { 'Content-Type': 'application/json' },
+  })
+  const activeSession = session!
 
-  if (!checkRateLimit(session.id)) {
+  if (!checkRateLimit(activeSession.id)) {
     return new Response(JSON.stringify({ error: `每小时最多 ${MAX_PER_HOUR} 次提问` }), {
       status: 429,
       headers: { 'Content-Type': 'application/json' },
@@ -99,10 +106,11 @@ export async function POST(req: NextRequest) {
   }
 
   let hits: SourceHit[] = []
+  const documentWhere = await buildDocumentWhere(activeSession)
 
   if (documentId) {
-    const doc = await prisma.document.findUnique({
-      where: { id: documentId },
+    const doc = await prisma.document.findFirst({
+      where: { AND: [{ id: documentId }, documentWhere] },
       include: {
         ownerDept: { select: { name: true, slug: true } },
         audiences: { select: { department: { select: { slug: true } } }, take: 1 },
@@ -144,9 +152,15 @@ export async function POST(req: NextRequest) {
         WHERE document_fts MATCH ?
         ORDER BY rank LIMIT 5
       `).all(ftsQuery) as any[]
+      const allowedIds = results.length > 0
+        ? new Set((await prisma.document.findMany({
+            where: { AND: [{ id: { in: results.map(r => r.id).filter(Boolean) } }, documentWhere] },
+            select: { id: true },
+          })).map(doc => doc.id))
+        : new Set<string>()
 
       for (const r of results) {
-        if (!hits.find(h => h.slug === r.slug)) {
+        if (allowedIds.has(r.id) && !hits.find(h => h.slug === r.slug)) {
           hits.push({
             id: r.id,
             title: r.title,
@@ -167,7 +181,7 @@ export async function POST(req: NextRequest) {
   // Fallback
   if (hits.length === 0) {
     const allDocs = await prisma.document.findMany({
-      where: { slug: { not: '' } },
+      where: { AND: [{ slug: { not: '' } }, documentWhere] },
       take: 3,
       include: {
         ownerDept: { select: { name: true, slug: true } },
@@ -305,7 +319,7 @@ export async function POST(req: NextRequest) {
         try {
           await prisma.chatLog.create({
             data: {
-              userId: session.id,
+              userId: activeSession.id,
               question: question.trim(),
               answer: cachedAnswer,
               sources: JSON.stringify(sourceMeta.map(s => s.title)),

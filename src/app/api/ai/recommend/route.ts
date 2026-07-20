@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'ai.recommend', '你没有查看 AI 推荐的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
-  const where = await buildDocumentWhere(session)
+  const where = await buildDocumentWhere(activeSession)
 
   // Recommend based on:
   // 1. Popular docs (most viewed via AuditLog)
@@ -25,8 +28,8 @@ export async function GET(req: NextRequest) {
       orderBy: { _count: { documentId: 'desc' } },
       take: 8,
     }).catch(() => []),
-    (session.departmentId ? prisma.document.findMany({
-      where: { ...where, ownerDeptId: session.departmentId },
+    (activeSession.departmentId ? prisma.document.findMany({
+      where: { ...where, ownerDeptId: activeSession.departmentId },
       select: { id: true, title: true, slug: true, category: true, documentType: true,
         ownerDept: { select: { name: true } },
         audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
@@ -53,7 +56,7 @@ export async function GET(req: NextRequest) {
   if (popularIds.length > 0) {
     const ids = popularIds.map(g => g.documentId).filter(Boolean) as string[]
     const docs = await prisma.document.findMany({
-      where: { id: { in: ids } },
+      where: { AND: [{ id: { in: ids } }, where] },
       select: { id: true, title: true, slug: true, category: true,
         ownerDept: { select: { name: true } },
         audiences: { include: { department: { select: { slug: true } } }, take: 1 } },

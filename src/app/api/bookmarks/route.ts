@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 /** GET /api/bookmarks — list user's bookmarked documents */
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const documentWhere = await buildDocumentWhere(session)
 
   const bookmarks = await prisma.bookmark.findMany({
     where: { userId: session.id },
@@ -15,7 +18,7 @@ export async function GET(req: NextRequest) {
   const docIds = bookmarks.map(b => b.documentId)
   const docs = docIds.length > 0
     ? await prisma.document.findMany({
-        where: { id: { in: docIds } },
+        where: { AND: [{ id: { in: docIds } }, documentWhere] },
         select: { id: true, title: true, slug: true, category: true,
           ownerDept: { select: { name: true } },
           audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
@@ -32,34 +35,41 @@ export async function GET(req: NextRequest) {
 /** POST /api/bookmarks — add a bookmark */
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'favorite.create', '你没有收藏文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const { documentId } = await req.json().catch(() => ({}))
   if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
+  const documentWhere = await buildDocumentWhere(activeSession)
+  const visibleDocument = await prisma.document.findFirst({ where: { AND: [{ id: documentId }, documentWhere] }, select: { id: true } })
+  if (!visibleDocument) return NextResponse.json({ error: '文档不存在或无权收藏' }, { status: 404 })
 
   await prisma.bookmark.upsert({
-    where: { userId_documentId: { userId: session.id, documentId } },
-    create: { userId: session.id, documentId },
+    where: { userId_documentId: { userId: activeSession.id, documentId } },
+    create: { userId: activeSession.id, documentId },
     update: {}, // no-op if exists
   })
 
-  const count = await prisma.bookmark.count({ where: { userId: session.id } })
+  const count = await prisma.bookmark.count({ where: { userId: activeSession.id } })
   return NextResponse.json({ ok: true, total: count })
 }
 
 /** DELETE /api/bookmarks — remove a bookmark */
 export async function DELETE(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'favorite.delete', '你没有取消收藏的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const { searchParams } = new URL(req.url)
   const documentId = searchParams.get('documentId')
   if (!documentId) return NextResponse.json({ error: 'documentId required' }, { status: 400 })
 
   await prisma.bookmark.deleteMany({
-    where: { userId: session.id, documentId },
+    where: { userId: activeSession.id, documentId },
   })
 
-  const count = await prisma.bookmark.count({ where: { userId: session.id } })
+  const count = await prisma.bookmark.count({ where: { userId: activeSession.id } })
   return NextResponse.json({ ok: true, total: count })
 }

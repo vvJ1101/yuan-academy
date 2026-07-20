@@ -17,6 +17,8 @@ import {
 import { logDocumentAccess } from '@/lib/audit'
 import { prisma } from '@/lib/prisma'
 import { getDocumentPermission } from '@/lib/permissions/folders'
+import { getUserPermissions } from '@/lib/permissions/rbac'
+import { hasResolvedPermission } from '@/lib/permissions/guards'
 import { readVerifiedSession } from '@/lib/session'
 
 const FILE_TYPES = new Set<DocumentFileType>(['pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'docx'])
@@ -45,6 +47,13 @@ async function serveDocumentFile(
 
   if (disposition !== 'inline' && disposition !== 'attachment') return jsonError('文件打开方式无效', 400)
   if (purpose !== 'read' && purpose !== 'print') return jsonError('文件用途无效', 400)
+  const resolvedPermissions = await getUserPermissions(session)
+  if (purpose === 'print' && !hasResolvedPermission(resolvedPermissions.permissions, 'document.print')) {
+    return jsonError('你没有打印文档的权限', 403)
+  }
+  if ((variant === 'original' || disposition === 'attachment') && !hasResolvedPermission(resolvedPermissions.permissions, 'document.downloadOriginal')) {
+    return jsonError('你没有下载原文件的权限', 403)
+  }
   if (!FILE_TYPES.has(document.fileType as DocumentFileType)) return jsonError('文档文件类型无效', 404)
 
   const fileType = document.fileType as DocumentFileType
