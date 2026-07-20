@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await requirePermission(session, 'menu.admin.roles', '无权查看角色')
+  if (!guard.ok) return guard.response
   const role = await prisma.sysRole.findUnique({ where: { id: (await params).id } })
   if (!role) return NextResponse.json({ code: 404, message: 'Not found' }, { status: 404 })
   return NextResponse.json({
@@ -22,9 +22,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await requirePermission(session, 'role.edit', '无权编辑角色')
+  if (!guard.ok) return guard.response
   const body = await req.json()
   const data: any = {}
   if (body.name !== undefined) data.name = body.name
@@ -39,9 +38,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await requirePermission(session, 'role.delete', '无权删除角色')
+  if (!guard.ok) return guard.response
   const userCount = await prisma.sysUserRole.count({ where: { roleId: (await params).id } })
   if (userCount > 0) {
     return NextResponse.json({ code: 400, message: '该角色下存在用户，无法删除' }, { status: 400 })

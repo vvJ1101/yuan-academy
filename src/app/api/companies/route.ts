@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
-
-function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
@@ -21,7 +20,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const guard = await requirePermission(session, 'org.companyCreate', '无权添加公司')
+  if (!guard.ok) return guard.response
 
   const { name, slug, description } = await req.json()
   if (!name || !slug) return NextResponse.json({ error: 'Name and slug required' }, { status: 400 })
@@ -34,12 +34,14 @@ export async function POST(req: NextRequest) {
     select: { id: true, name: true, slug: true, description: true,
       _count: { select: { departments: true, users: true } } },
   })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "company:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(company, { status: 201 })
 }
 
 export async function PUT(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const guard = await requirePermission(session, 'org.companyEdit', '无权编辑公司')
+  if (!guard.ok) return guard.response
 
   const { id, name, slug, description } = await req.json()
   if (!id) return NextResponse.json({ error: 'Company ID required' }, { status: 400 })
@@ -54,17 +56,20 @@ export async function PUT(req: NextRequest) {
     select: { id: true, name: true, slug: true, description: true,
       _count: { select: { departments: true, users: true } } },
   })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "company:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(company)
 }
 
 export async function DELETE(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const guard = await requirePermission(session, 'org.companyDelete', '无权删除公司')
+  if (!guard.ok) return guard.response
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Company ID required' }, { status: 400 })
 
   await prisma.company.delete({ where: { id } })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "company:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ ok: true })
 }

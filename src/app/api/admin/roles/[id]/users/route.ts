@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
+import { clearPermissionCache } from '@/lib/permissions/rbac'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id) return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'role.assignUser', '无权查看角色用户')
+  if (!guard.ok) return guard.response
   const { searchParams } = new URL(req.url)
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
   const size = Math.min(100, parseInt(searchParams.get('size') || '20'))
@@ -28,9 +31,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await requirePermission(session, 'role.assignUser', '无权选择角色用户')
+  if (!guard.ok) return guard.response
   const body = await req.json()
   const userIds: string[] = body.userIds || []
   for (const userId of userIds) {
@@ -40,5 +42,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       update: {},
     })
   }
+  clearPermissionCache()
+  prisma.auditLog.create({ data: { userId: session!.id, action: "roleUser:add" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: `已添加 ${userIds.length} 名用户` })
 }

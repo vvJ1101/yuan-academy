@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { clearPermCache } from '@/lib/permissions/folders'
+import { requirePermission } from '@/lib/permissions/guards'
 
 // GET /api/folders/permissions?folderId=xxx
 export async function GET(req: NextRequest) {
@@ -26,9 +27,8 @@ export async function GET(req: NextRequest) {
 // POST /api/folders/permissions — add permission rule
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await requirePermission(session, 'folder.permissionManage', '无权管理文件夹权限')
+  if (!guard.ok) return guard.response
 
   const { folderId, companyId, departmentId, userId, role, permission } = await req.json().catch(() => ({}))
   if (!folderId || !permission) return NextResponse.json({ error: 'folderId and permission required' }, { status: 400 })
@@ -51,15 +51,15 @@ export async function POST(req: NextRequest) {
   })
 
   clearPermCache()
+  prisma.auditLog.create({ data: { userId: session!.id, action: "folderPermission:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ permission: perm }, { status: 201 })
 }
 
 // DELETE /api/folders/permissions?id=xxx
 export async function DELETE(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const guard = await requirePermission(session, 'folder.permissionManage', '无权管理文件夹权限')
+  if (!guard.ok) return guard.response
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
@@ -67,5 +67,6 @@ export async function DELETE(req: NextRequest) {
 
   await prisma.folderPermission.delete({ where: { id } })
   clearPermCache()
+  prisma.auditLog.create({ data: { userId: session!.id, action: "folderPermission:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ ok: true })
 }
