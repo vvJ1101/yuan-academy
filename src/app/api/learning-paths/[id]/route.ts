@@ -3,12 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { logEdit } from '@/lib/audit'
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
 
-  const existing = await prisma.learningPath.findUnique({ where: { id: params.id } })
+  const existing = await prisma.learningPath.findUnique({ where: { id: (await params).id } })
   if (!existing) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
@@ -18,7 +18,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   // Full replacement strategy
   const updated = await prisma.learningPath.update({
-    where: { id: params.id },
+    where: { id: (await params).id },
     data: {
       title,
       deptId: deptId || existing.deptId,
@@ -27,7 +27,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   })
 
   // Audit log
-  logEdit(session.id, params.id).catch((err: any) => console.error("[AuditLogError]", err))
+  logEdit(session.id, (await params).id).catch((err: any) => console.error("[AuditLogError]", err))
 
   // Resolve docs for response
   let docIdList: string[] = []
@@ -45,14 +45,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ success: true, data: { ...updated, docs: ordered, docCount: ordered.length } })
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
 
-  const existing = await prisma.learningPath.findUnique({ where: { id: params.id } })
+  const existing = await prisma.learningPath.findUnique({ where: { id: (await params).id } })
   if (!existing) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
-  await prisma.learningPath.delete({ where: { id: params.id } })
+  await prisma.learningPath.delete({ where: { id: (await params).id } })
   return NextResponse.json({ success: true })
 }

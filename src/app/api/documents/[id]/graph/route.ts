@@ -3,12 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { canReadDocument } from '@/lib/permissions/documents'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     include: {
       ownerDept: { select: { name: true, slug: true } },
       audiences: { include: { department: { select: { name: true, slug: true } } } },

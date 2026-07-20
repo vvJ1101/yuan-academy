@@ -3,13 +3,13 @@ import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { canReadDocument } from '@/lib/permissions/documents'
 
 /** GET /api/documents/[id]/history — list edit history for a document */
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Verify user can read this document
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: {
       id: true, ownerDeptId: true, folderId: true,
       audiences: { select: { departmentId: true } },
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const history = await (prisma as any).documentHistory.findMany({
-    where: { documentId: params.id },
+    where: { documentId: (await params).id },
     orderBy: { createdAt: 'desc' },
   })
 

@@ -27,13 +27,13 @@ function jsonError(error: string, status: number, headers?: HeadersInit) {
 
 async function serveDocumentFile(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await readVerifiedSession(req.headers.get('cookie'))
   if (!session) return jsonError('请先登录', 401)
 
   const document = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: { id: true, originalFileName: true, fileType: true, mimeType: true },
   })
   if (!document) return jsonError('文档不存在', 404)
@@ -94,6 +94,6 @@ async function serveDocumentFile(
   return new NextResponse(stream as unknown as BodyInit, { status: range ? 206 : 200, headers })
 }
 
-export async function GET(req: NextRequest, context: { params: { id: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   return serveDocumentFile(req, context)
 }

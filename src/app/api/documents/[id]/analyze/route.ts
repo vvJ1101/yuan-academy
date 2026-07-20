@@ -164,7 +164,7 @@ function sanitizeDraft(draft: string): string {
 }
 
 // ── POST handler: Two-phase pipeline ──
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Auth
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   // Load document
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: { id: true, title: true, fullContent: true, ownerDeptId: true, category: true, ownerDept: { select: { name: true } } },
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })

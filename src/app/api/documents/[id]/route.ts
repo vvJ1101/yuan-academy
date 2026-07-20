@@ -7,12 +7,13 @@ import { join } from 'path'
 import { sanitizeMarkdown } from '@/lib/sanitize'
 import { logEdit } from '@/lib/audit'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: routeParams.id },
     include: {
       ownerDept: { select: { name: true, slug: true } },
       audiences: { include: { department: { select: { name: true, slug: true } } } },
@@ -31,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   if (session.role === 'super_admin') {
     userPermission = 'admin'
   } else {
-    try { userPermission = await getDocumentPermission(session, params.id) } catch {}
+    try { userPermission = await getDocumentPermission(session, routeParams.id) } catch {}
     if (!userPermission && doc.ownerDeptId === session.departmentId) {
       userPermission = session.role === 'dept_admin' ? 'admin' : 'edit'
     }
@@ -41,20 +42,21 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 // PUT — Edit document metadata
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: routeParams.id },
     include: { ownerDept: true },
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Use full permission engine (folder inherit + doc override + legacy + policy check)
   let userPerm: string | null = null
-  try { userPerm = await getDocumentPermission(session, params.id) } catch {}
+  try { userPerm = await getDocumentPermission(session, routeParams.id) } catch {}
   if (!canEditDocument(session, doc.ownerDeptId, undefined, doc.category) && !(userPerm && ['edit', 'delete', 'admin'].includes(userPerm))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
@@ -82,17 +84,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   // Update audiences if provided
   if (audienceIds !== undefined) {
-    await prisma.documentAudience.deleteMany({ where: { documentId: params.id } })
+    await prisma.documentAudience.deleteMany({ where: { documentId: routeParams.id } })
     if (audienceIds.length > 0) {
       await Promise.all(audienceIds.map((deptId: string) =>
-        prisma.documentAudience.create({ data: { documentId: params.id, departmentId: deptId } })
+        prisma.documentAudience.create({ data: { documentId: routeParams.id, departmentId: deptId } })
           .catch((err: any) => console.error("[AuditLogError]", err))
       ))
     }
   }
 
   const updated = await prisma.document.update({
-    where: { id: params.id },
+    where: { id: routeParams.id },
     data,
     include: {
       ownerDept: { select: { name: true, slug: true } },
@@ -105,7 +107,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (content !== undefined) {
     await (prisma as any).documentHistory.create({
       data: {
-        documentId: params.id,
+        documentId: routeParams.id,
         content: (typeof content === 'string' ? content.substring(0, 100000) : doc.fullContent) || '',
         editorId: session.id,
         editorName: session.name || session.departmentName || 'Unknown',
@@ -115,37 +117,38 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 
   // ── Audit log ──
-  logEdit(session.id, params.id)
+  logEdit(session.id, routeParams.id)
 
   return NextResponse.json(updated)
 }
 
 // DELETE — Delete document
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const routeParams = await params
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: routeParams.id },
     select: { id: true, ownerDeptId: true, folderId: true, category: true },
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // Use full permission engine (folder inherit + doc override + legacy + policy check)
   let userPermDel: string | null = null
-  try { userPermDel = await getDocumentPermission(session, params.id) } catch {}
+  try { userPermDel = await getDocumentPermission(session, routeParams.id) } catch {}
   if (!canDeleteDocument(session, doc.ownerDeptId, undefined, doc.category) && !(userPermDel && ['delete', 'admin'].includes(userPermDel))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   // Delete related records
-  await prisma.documentAudience.deleteMany({ where: { documentId: params.id } })
-  await prisma.auditLog.deleteMany({ where: { documentId: params.id } })
-  await prisma.document.delete({ where: { id: params.id } })
+  await prisma.documentAudience.deleteMany({ where: { documentId: routeParams.id } })
+  await prisma.auditLog.deleteMany({ where: { documentId: routeParams.id } })
+  await prisma.document.delete({ where: { id: routeParams.id } })
 
   // Delete uploaded images
-  const imgDir = join(process.cwd(), 'public', 'uploads', 'documents', params.id)
+  const imgDir = join(process.cwd(), 'public', 'uploads', 'documents', routeParams.id)
   if (existsSync(imgDir)) {
     try { rmSync(imgDir, { recursive: true }) } catch {}
   }

@@ -4,12 +4,12 @@ import { getSessionFromCookies } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   }
-  const role = await prisma.sysRole.findUnique({ where: { id: params.id } })
+  const role = await prisma.sysRole.findUnique({ where: { id: (await params).id } })
   if (!role) return NextResponse.json({ code: 404, message: 'Not found' }, { status: 404 })
   return NextResponse.json({
     code: 0, data: {
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   })
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
@@ -30,23 +30,23 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (body.name !== undefined) data.name = body.name
   if (body.description !== undefined) data.description = body.description
   if (body.status !== undefined) data.status = body.status === 'disabled' ? 0 : 1
-  await prisma.sysRole.update({ where: { id: params.id }, data })
+  await prisma.sysRole.update({ where: { id: (await params).id }, data })
   prisma.auditLog.create({ data: { userId: session!.id, action: "role:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: '更新成功' })
 
 
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id || session.role !== 'super_admin') {
     return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
   }
-  const userCount = await prisma.sysUserRole.count({ where: { roleId: params.id } })
+  const userCount = await prisma.sysUserRole.count({ where: { roleId: (await params).id } })
   if (userCount > 0) {
     return NextResponse.json({ code: 400, message: '该角色下存在用户，无法删除' }, { status: 400 })
   }
-  await prisma.sysRole.delete({ where: { id: params.id } })
+  await prisma.sysRole.delete({ where: { id: (await params).id } })
   prisma.auditLog.create({ data: { userId: session!.id, action: "role:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ code: 0, message: '删除成功' })
 

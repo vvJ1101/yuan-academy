@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 })
 
-  const faq = await prisma.faq.findUnique({ where: { id: params.id } })
+  const faq = await prisma.faq.findUnique({ where: { id: (await params).id } })
   if (!faq) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
   // dept_admin: only edit own department's FAQ
@@ -33,7 +33,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (order !== undefined) data.order = order
 
   const updated = await prisma.faq.update({
-    where: { id: params.id },
+    where: { id: (await params).id },
     data,
     include: { department: { select: { name: true, slug: true } } },
   })
@@ -41,12 +41,12 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ success: true, data: updated })
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   if (session.role === 'staff') return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 })
 
-  const faq = await prisma.faq.findUnique({ where: { id: params.id } })
+  const faq = await prisma.faq.findUnique({ where: { id: (await params).id } })
   if (!faq) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
   // dept_admin: only delete own department's FAQ
@@ -56,6 +56,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     }
   }
 
-  await prisma.faq.delete({ where: { id: params.id } })
+  await prisma.faq.delete({ where: { id: (await params).id } })
   return NextResponse.json({ success: true })
 }

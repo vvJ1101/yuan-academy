@@ -7,12 +7,12 @@ import { getOriginalFilePath, getPreviewFilePath, validateUploadFile } from '@/l
 import { canEdit } from '@/lib/permissions/documents'
 import { getDocumentPermission } from '@/lib/permissions/folders'
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: '请先登录' }, { status: 401 })
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: {
       id: true, title: true, fullContent: true, condensedContent: true, content: true,
       displayMode: true, fileType: true,
