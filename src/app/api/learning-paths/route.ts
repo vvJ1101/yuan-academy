@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const guard = await requirePermission(session, 'menu.admin.learningPaths', '你没有查看学习路径的权限')
+  if (!guard.ok) return guard.response
 
   const paths = await prisma.learningPath.findMany({ orderBy: { createdAt: 'desc' } })
 
@@ -29,8 +31,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
+  const guard = await requirePermission(session, 'learningPath.create', '你没有新建学习路径的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const { title, deptId, docIds } = await req.json().catch(() => ({}))
   if (!title) return NextResponse.json({ success: false, error: 'Title required' }, { status: 400 })
@@ -39,13 +42,15 @@ export async function POST(req: NextRequest) {
     data: { title, deptId: deptId || null, docIds: JSON.stringify(Array.isArray(docIds) ? docIds : []) },
   })
 
+  prisma.auditLog.create({ data: { userId: activeSession.id, action: 'learningPath:create' } }).catch((err: any) => console.error('[AuditLogError]', err))
   return NextResponse.json({ success: true, data: path }, { status: 201 })
 }
 
 export async function DELETE(req: NextRequest) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
+  const guard = await requirePermission(session, 'learningPath.delete', '你没有删除学习路径的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
@@ -56,5 +61,6 @@ export async function DELETE(req: NextRequest) {
   } catch {
     return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
   }
+  prisma.auditLog.create({ data: { userId: activeSession.id, action: 'learningPath:delete' } }).catch((err: any) => console.error('[AuditLogError]', err))
   return NextResponse.json({ success: true })
 }
