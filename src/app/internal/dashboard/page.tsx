@@ -72,7 +72,7 @@ const RECENT_UPDATES = [
 ]
 
 const QUICK_ENTRIES = [
-  { label: '订货政策', icon: ScrollText, slug: '/internal/brand?type=ordering' },
+  { label: '订货政策', icon: ScrollText, slug: '/internal/policy' },
   { label: '品牌对接', icon: Building2, slug: '/internal/brand?type=contact' },
   { label: '知识空间', icon: BookOpen, slug: '/internal/documents' },
   { label: '权限管理', icon: Settings, slug: '/internal/admin/role-permissions' },

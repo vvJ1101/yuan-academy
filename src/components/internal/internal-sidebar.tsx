@@ -6,6 +6,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Folder, Home, Clock, Star, Upload, ChevronDown, ChevronRight, Layout, Wrench, Loader2, ScrollText } from 'lucide-react'
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
 import { TreeFolder } from '@/components/internal/TreeFolder'
+import { BRAND_LINKS } from '@/components/internal/sidebar-links'
 
 interface FolderItem { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
@@ -16,11 +17,6 @@ const QUICK_LINKS = [
   { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'menu.favorites' },
   { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'menu.documents' },
   { href: '/internal/admin', label: '管理中心', Icon: Wrench, perm: 'menu.admin', permKey: 'admin' },
-]
-
-const BRAND_LINKS = [
-  { href: '/internal/brand?type=ordering', label: '订货政策', permKey: 'menu.brand.ordering', type: 'ordering' },
-  { href: '/internal/brand?type=contact', label: '品牌对接信息', permKey: 'menu.brand.contact', type: 'contact' },
 ]
 
 export function InternalSidebar({ onClose }: { onClose?: () => void }) {
@@ -256,9 +252,17 @@ function PermBadge({ perm }: { perm: string }) {
     return false
   }
   const visibleBrandLinks = BRAND_LINKS.filter(link => canSeePermission(link.permKey) || canSeePermission('menu.brand'))
-  const brandOpen = pathname === '/internal/brand' || pathname.startsWith('/internal/brand/')
+  const brandOpen = pathname === '/internal/brand'
+    || pathname.startsWith('/internal/brand/')
+    || pathname === '/internal/policy'
+    || pathname.startsWith('/internal/policy/')
   const brandExpanded = brandOpen || expanded.has('brand-data')
-  const activeBrandType = pathname === '/internal/brand' ? (searchParams.get('type') || 'contact') : ''
+  const activeBrandType = pathname === '/internal/policy'
+    || pathname.startsWith('/internal/policy/')
+    ? 'ordering'
+    : pathname === '/internal/brand'
+      ? (searchParams.get('type') || 'contact')
+      : ''
 
   return (
     <aside className="w-[260px] h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden">
