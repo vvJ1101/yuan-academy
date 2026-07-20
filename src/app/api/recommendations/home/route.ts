@@ -6,10 +6,10 @@ import { buildDocumentWhere } from '@/lib/permissions/documents'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const where = buildDocumentWhere(session)
+  const where = await buildDocumentWhere(session)
 
   const [popularIds, deptDocs, recentAuditIds, riskDocs] = await Promise.all([
     // Popular by view count
@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
   // AI-generated recommendation reasons
   const recentDocIds = recentAuditIds.map(a => a.documentId).filter(Boolean) as string[]
   const reasons: Record<string, string> = {}
+  const seenIds = new Set<string>()
 
   if (recentDocIds.length > 0) {
     const recentDocs = await prisma.document.findMany({
@@ -63,18 +64,21 @@ export async function GET(req: NextRequest) {
     })
     for (const d of recentDocs) {
       reasons[d.id] = `你最近查看过「${d.ownerDept?.name || ''}」的文档`
+      seenIds.add(d.id)
     }
   }
   for (const d of deptDocs.slice(0, 3)) {
     if (!reasons[d.id]) reasons[d.id] = `来自你所在部门「${d.ownerDept?.name || ''}」的相关文档`
+    seenIds.add(d.id)
   }
   for (const d of popular.slice(0, 3)) {
     if (d && !reasons[d.id]) reasons[d.id] = '全公司高频访问文档'
+    if (d) seenIds.add(d.id)
   }
 
   return NextResponse.json({
     popular: popular.slice(0, 5).map((d: any) => ({ ...d, reason: reasons[d?.id] || '热门文档' })),
-    forYou: deptDocs.map((d: any) => ({ ...d, reason: reasons[d.id] || `归属${d.ownerDept?.name}` })),
+    forYou: deptDocs.filter((d: any) => !seenIds.has(d.id)).map((d: any) => ({ ...d, reason: reasons[d.id] || `归属${d.ownerDept?.name}` })).slice(0, 4),
     riskAlerts: riskDocs.map((d: any) => ({
       ...d, reason: d.riskLevel === 'high' ? '高风险文档，请关注' : '含风险提示内容',
     })),

@@ -24,6 +24,7 @@ export default function DocPage() {
   const params = useParams()
   const sp = useSearchParams()
   const from = sp.get('from')
+  const highlightQuery = sp.get('highlight') || ''
   const backHref = from === 'search' ? '/internal/search' :
     from === 'favorites' ? '/internal/favorites' :
     from === 'recent' ? '/internal/recent' :
@@ -34,6 +35,23 @@ export default function DocPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('original')
   const [bookmarked, setBookmarked] = useState(false)
   const [graph, setGraph] = useState<any>(null)
+
+  // ═══ Search highlight ═══
+  useEffect(() => {
+    if (!highlightQuery || !doc?.id) return
+    const keywords = highlightQuery.split(/\s+/).filter(k => k.length >= 2)
+    if (!keywords.length) return
+
+    const doHighlight = () => {
+      const container = document.querySelector('.doc-content')
+      if (!container) return
+      highlightInElement(container as HTMLElement, keywords)
+    }
+
+    // 多次尝试确保 ReactMarkdown 渲染完成
+    const timers = [0, 100, 300].map(t => setTimeout(doHighlight, t))
+    return () => timers.forEach(clearTimeout)
+  }, [doc?.id, highlightQuery, viewMode])
 
   useEffect(() => {
     if (!doc?.id) return
@@ -265,4 +283,41 @@ function GraphBlock({ title, docs }: { title: ReactNode; docs: {id:string;title:
       ))}
     </div>
   )
+}
+
+/** 在 DOM 元素中高亮关键词 */
+function highlightInElement(element: HTMLElement, keywords: string[]) {
+  if (!keywords.length) return
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null)
+  const textNodes: Text[] = []
+  let node: Node | null
+  while (node = walker.nextNode()) {
+    const parent = node.parentNode as Element | null
+    if (parent?.tagName === 'MARK' || parent?.tagName === 'SCRIPT' || parent?.tagName === 'STYLE') continue
+    if ((node as Text).textContent?.trim()) textNodes.push(node as Text)
+  }
+
+  const escaped = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const regex = new RegExp(`(${escaped.join('|')})`, 'gi')
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent || ''
+    if (!regex.test(text)) continue
+    // reset lastIndex
+    regex.lastIndex = 0
+
+    const parts = text.split(regex)
+    const fragment = document.createDocumentFragment()
+    for (let i = 0; i < parts.length; i++) {
+      if (regex.test(parts[i])) {
+        const mark = document.createElement('mark')
+        mark.className = 'bg-amber-200 text-amber-900 px-0.5 rounded'
+        mark.textContent = parts[i]
+        fragment.appendChild(mark)
+      } else {
+        fragment.appendChild(document.createTextNode(parts[i]))
+      }
+    }
+    textNode.parentNode?.replaceChild(fragment, textNode)
+  }
 }

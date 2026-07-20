@@ -139,7 +139,11 @@ function PolicyDetailTable({p, copyText}:{p:Policy; copyText:(t:string)=>Promise
           <p className="text-[0.72rem] font-semibold text-[#2563EB]">品牌订货政策</p>
           <CopyBtn text={p.policy} />
         </div>
-        {policyParsed && policyParsed.tiers.length > 0 ? (
+        {policyParsed?.type === 'structured' ? (
+          // 结构化格式：区块展示
+          <StructuredPolicy policy={policyParsed} />
+        ) : policyParsed && policyParsed.tiers.length > 0 ? (
+          // 简单格式：表格展示
           <>
             <div className="flex items-center gap-2 text-[0.68rem] font-semibold text-neutral-900 pb-1.5">
               <span className="min-w-[3em]">订货门槛</span>
@@ -170,6 +174,48 @@ function PolicyDetailTable({p, copyText}:{p:Policy; copyText:(t:string)=>Promise
 
       {/* Delivery */}
       {p.delivery && <p className="text-[0.72rem] flex items-center gap-1"><span className="font-medium text-neutral-900">{FL.delivery}</span><span className="text-neutral-300 mx-1">|</span><span className="text-neutral-700">{p.delivery}</span><CopyBtn text={p.delivery} /></p>}
+    </div>
+  )
+}
+
+// 结构化政策展示组件
+function StructuredPolicy({ policy }: { policy: ReturnType<typeof parsePolicyText> }) {
+  if (!policy || policy.type !== 'structured') return null
+
+  return (
+    <div className="space-y-3">
+      {/* 标题 */}
+      {policy.title && (
+        <p className="text-[0.75rem] font-semibold text-neutral-900 border-b border-neutral-200 pb-1.5">{policy.title}</p>
+      )}
+
+      {/* 各区块 */}
+      {policy.sections.map((section, idx) => (
+        <div key={idx} className="space-y-1.5">
+          {section.title && (
+            <p className="text-[0.68rem] font-medium text-[#2563EB] flex items-center gap-1">
+              <span className="inline-block w-1 h-3 bg-[#2563EB] rounded-full" />
+              {section.title}
+            </p>
+          )}
+          <div className="pl-2 space-y-0.5">
+            {section.fields.map((field, fIdx) => (
+              field.key ? (
+                <p key={fIdx} className="text-[0.72rem] leading-relaxed">
+                  <span className={`font-medium ${field.isHighlight ? 'text-neutral-900' : 'text-neutral-600'}`}>
+                    {field.key}：
+                  </span>
+                  <span className={field.isHighlight ? 'text-[#2563EB] font-semibold' : 'text-neutral-700'}>
+                    {field.value}
+                  </span>
+                </p>
+              ) : (
+                <p key={fIdx} className="text-[0.72rem] text-neutral-500 italic">{field.value}</p>
+              )
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }function CopyBtn({text}:{text:string}){

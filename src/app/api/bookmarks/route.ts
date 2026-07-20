@@ -4,7 +4,7 @@ import { getSessionFromCookies } from '@/lib/auth'
 
 /** GET /api/bookmarks — list user's bookmarked documents */
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const bookmarks = await prisma.bookmark.findMany({
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/bookmarks — add a bookmark */
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { documentId } = await req.json().catch(() => ({}))
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
 /** DELETE /api/bookmarks — remove a bookmark */
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)

@@ -194,7 +194,7 @@
 | **AI 引擎** | DeepSeek API（`DEEPSEEK_API_KEY` 在 `.env.local`） |
 | **部署前** | `npx prisma db push` + `npx tsx scripts/fts-migrate.ts` / 部署: `bash scripts/deploy-local.sh` 或 `git push origin main`（自动 CI/CD） |
 - `src/types/dashboard.ts` — 仪表盘共享类型（StatsData / ASR / UserInfo，6 个组件依赖）
-| **测试账号** | `admin@yuanshowroom.com` / `admin123` |
+| **测试账号** | 从本地安全配置或密码管理器获取，不写入仓库 |
 
 ### 关键目录
 
@@ -253,7 +253,7 @@
 
 ### 运维文档
 
-服务器账号密码、部署流程、重启命令等 → 见 **[DEPLOY.md](DEPLOY.md)**
+部署流程和重启命令 → 见 **[DEPLOY.md](DEPLOY.md)**；服务器凭据必须通过安全渠道获取。
 
 
 ### CI/CD 自动部署（GitHub Actions）

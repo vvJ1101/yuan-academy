@@ -6,13 +6,12 @@
 
 import { prisma } from '@/lib/prisma'
 
-type AuditAction = 'view' | 'edit' | 'delete' | 'analyze' | 'upload'
+type AuditAction = 'view' | 'edit' | 'delete' | 'analyze' | 'upload' | 'preview' | 'download' | 'print'
 
 export async function logDocumentAccess(
   userId: string,
   documentId: string,
   action: AuditAction,
-  metadata?: Record<string, string>,
 ) {
   try {
     await prisma.auditLog.create({
@@ -36,6 +35,11 @@ export function logView(userId: string, documentId: string) {
 /** Log a document edit */
 export function logEdit(userId: string, documentId: string) {
   return logDocumentAccess(userId, documentId, 'edit')
+}
+
+/** Log a document upload. */
+export function logUpload(userId: string, documentId: string) {
+  return logDocumentAccess(userId, documentId, 'upload')
 }
 
 /** Log a document deletion */

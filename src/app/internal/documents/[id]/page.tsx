@@ -1,11 +1,42 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, ArrowLeft, Eye, Edit3, Save, Star, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { Permission } from '@/lib/permissions/folders'
+import { buildDocumentReplacementUrl } from '@/components/internal/pdf-reader/reader-state'
+import { createExportResourceManager } from '@/components/internal/pdf-reader/export-resources'
+import { mapReplacementOutcome, type ReplacementOutcome } from '@/components/internal/pdf-reader/replacement-feedback'
+
+const PdfReader = dynamic(
+  () => import('@/components/internal/pdf-reader/pdf-reader').then((module) => module.PdfReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border border-neutral-200 bg-neutral-50">
+        <Loader2 className="size-6 animate-spin text-blue-500" />
+        <span className="ml-2 text-sm text-neutral-500">正在打开在线阅读器…</span>
+      </div>
+    ),
+  },
+)
+
+const ExcelReader = dynamic(
+  () => import('@/components/internal/excel-reader').then((module) => module.ExcelReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border border-neutral-200 bg-neutral-50">
+        <Loader2 className="size-6 animate-spin text-blue-500" />
+        <span className="ml-2 text-sm text-neutral-500">正在打开 Excel 阅读器…</span>
+      </div>
+    ),
+  },
+)
 
 interface Doc {
   id: string; title: string; slug: string; content: string; fullContent: string; condensedContent: string
@@ -14,6 +45,9 @@ interface Doc {
   audiences: { id: string; departmentId: string; department: { name: string; slug: string } }[]
   author: { name: string }; updatedAt: string
   userPermission: string | null
+  fileType: string
+  processingStatus: 'pending' | 'processing' | 'ready' | 'failed'
+  processingError: string | null
 }
 
 type Tab = 'preview' | 'edit'
@@ -29,12 +63,28 @@ export default function DocumentDetailPage() {
   const [editContent, setEditContent] = useState('')
   const [remark, setRemark] = useState('')
   const [saving, setSaving] = useState(false)
+  const [downloadingOriginal, setDownloadingOriginal] = useState(false)
+  const [replacingFile, setReplacingFile] = useState(false)
+  const [replacementFile, setReplacementFile] = useState<File | null>(null)
+  const [recoveryMessage, setRecoveryMessage] = useState('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [bookmarked, setBookmarked] = useState(false)
   const [history, setHistory] = useState<{id:string;userId:string;action:string;createdAt:string;user?:{name:string}}[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
+  const replacementInputRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+  const failedExportManagerRef = useRef<ReturnType<typeof createExportResourceManager> | null>(null)
+  if (!failedExportManagerRef.current) failedExportManagerRef.current = createExportResourceManager()
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      failedExportManagerRef.current?.cleanup()
+    }
+  }, [])
 
   useEffect(() => {
     if (!id) return
@@ -106,6 +156,100 @@ export default function DocumentDetailPage() {
     }
   }
 
+  const handleFailedPreviewDownload = async () => {
+    if (!doc || !canEdit) return
+    const manager = failedExportManagerRef.current!
+    const signal = manager.begin()
+    setDownloadingOriginal(true)
+    setError('')
+    try {
+      const response = await fetch(`/api/documents/${encodeURIComponent(doc.id)}/file?variant=original&disposition=attachment`, {
+        credentials: 'same-origin',
+        signal,
+      })
+      if (response.status === 403) throw new Error('你没有下载或打印权限')
+      if (!response.ok) throw new Error('下载失败，请稍后重试')
+      const blobUrl = URL.createObjectURL(await response.blob())
+      manager.trackBlobUrl(blobUrl)
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = `${doc.title}.${doc.fileType}`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      manager.deferCleanup(1000, { closePopup: false })
+    } catch (downloadError) {
+      manager.cleanup()
+      if (mountedRef.current && !(downloadError instanceof DOMException && downloadError.name === 'AbortError')) {
+        setError(downloadError instanceof Error ? downloadError.message : '下载失败，请稍后重试')
+      }
+    } finally {
+      if (mountedRef.current) setDownloadingOriginal(false)
+    }
+  }
+
+  const handleReplacementFile = async (file: File | undefined): Promise<ReplacementOutcome> => {
+    if (!doc || !canEdit || !file) {
+      return {
+        status: 'request-error',
+        accepted: false,
+        clearFile: false,
+        message: '无法替换文件，请刷新页面后重试。',
+      }
+    }
+    setReplacingFile(true)
+    setRecoveryMessage('')
+    setError('')
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const response = await fetch(buildDocumentReplacementUrl(doc.id), {
+        method: 'POST',
+        body: formData,
+      })
+      const result = await response.json().catch(() => ({}))
+      const outcome = mapReplacementOutcome({ kind: 'response', ok: response.ok, payload: result })
+      if (!outcome.accepted) {
+        setDoc((current) => outcome.status === 'failed' && current ? {
+          ...current,
+          processingStatus: 'failed',
+          processingError: outcome.message,
+        } : current)
+        setError(outcome.message)
+        return outcome
+      }
+      const extension = file.name.split('.').pop()?.toLowerCase() || doc.fileType
+      const status = outcome.status
+      const fallbackDocument = {
+        fileType: extension,
+        processingStatus: status,
+        processingError: null,
+        updatedAt: new Date().toISOString(),
+      }
+      try {
+        const refreshedResponse = await fetch(`/api/documents/${encodeURIComponent(doc.id)}`)
+        if (!refreshedResponse.ok) throw new Error('refresh failed')
+        const refreshedDocument = await refreshedResponse.json()
+        setDoc(refreshedDocument)
+        setEditContent(refreshedDocument.fullContent || refreshedDocument.content || '')
+      } catch {
+        setDoc((current) => current ? { ...current, ...fallbackDocument } : current)
+      }
+      setRecoveryMessage(outcome.message)
+      if (outcome.clearFile) {
+        setReplacementFile(null)
+        if (replacementInputRef.current) replacementInputRef.current.value = ''
+      }
+      return outcome
+    } catch (replacementError) {
+      const outcome = mapReplacementOutcome({ kind: 'network', error: replacementError })
+      setError(outcome.message)
+      return outcome
+    } finally {
+      setReplacingFile(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -124,6 +268,12 @@ export default function DocumentDetailPage() {
   }
 
   const displayContent = tab === 'preview' ? (doc.fullContent || doc.content) : editContent
+  const usesPdfReader = ['pdf', 'ppt', 'pptx'].includes(doc.fileType)
+  const usesExcelReader = ['xls', 'xlsx'].includes(doc.fileType)
+  const usesFileReader = usesPdfReader || usesExcelReader
+  const readerPermission: Permission = ['view', 'edit', 'delete', 'admin'].includes(doc.userPermission || '')
+    ? doc.userPermission as Permission
+    : 'view'
 
   return (
     <main className="max-w-4xl mx-auto px-4 sm:px-6 md:px-10 pb-16 pt-6 md:pt-8">
@@ -147,7 +297,7 @@ export default function DocumentDetailPage() {
           </button>
 
           {/* Edit / Preview toggle */}
-          {canEdit && (
+          {canEdit && !usesFileReader && (
             <div className="flex items-center bg-neutral-100 rounded-lg p-0.5">
               <button onClick={() => setTab('preview')}
                 className={`min-h-[44px] px-4 text-[0.78rem] rounded-md transition-all font-medium flex items-center gap-1.5 ${
@@ -199,29 +349,93 @@ export default function DocumentDetailPage() {
       {/* ── Content area ── */}
       {tab === 'preview' ? (
         /* ── Preview mode ── */
-        doc.displayMode === 'pdf' ? (
-          /* PDF 文档：嵌入 PDF 阅读器 */
-          <div className="w-full rounded-xl border border-neutral-200 overflow-hidden bg-neutral-50">
-            <iframe
-              src={`/uploads/documents/${doc.id}/output.pdf`}
-              className="w-full h-[85vh]"
-              style={{ border: 'none' }}
-              title={doc.title}
-            />
-            <div className="flex items-center justify-between px-4 py-2.5 bg-white border-t border-neutral-100">
-              <span className="text-[0.78rem] text-neutral-400 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                PDF 文档
-              </span>
-              <a
-                href={`/uploads/documents/${doc.id}/output.pdf`}
-                download
-                className="text-[0.78rem] text-[#2563EB] hover:text-blue-700 font-medium"
-              >
-                下载 PDF
-              </a>
+        usesFileReader ? (
+          doc.processingStatus === 'ready' ? (
+            usesPdfReader ? (
+              <PdfReader
+                documentId={doc.id}
+                title={doc.title}
+                permission={readerPermission}
+                fileType={doc.fileType}
+              />
+            ) : (
+              <ExcelReader
+                key={`${doc.id}-${doc.updatedAt}`}
+                documentId={doc.id}
+                title={doc.title}
+                permission={readerPermission}
+                fileType={doc.fileType as 'xls' | 'xlsx'}
+                onReplaceFile={handleReplacementFile}
+              />
+            )
+          ) : doc.processingStatus === 'processing' || doc.processingStatus === 'pending' ? (
+            <div className="flex min-h-[45vh] flex-col items-center justify-center gap-4 rounded-xl border border-neutral-200 bg-neutral-50 px-4 text-center">
+              <Loader2 className="size-7 animate-spin text-blue-500" aria-hidden="true" />
+              <div>
+                <p className="text-sm font-medium text-neutral-700">正在准备在线预览</p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  {usesPdfReader && doc.fileType !== 'pdf'
+                    ? 'PPT 转换可能需要几分钟，完成后刷新页面即可阅读。'
+                    : '文件处理完成后刷新页面即可阅读。'}
+                </p>
+              </div>
+              <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-neutral-200">
+                <div className="h-full w-1/2 animate-pulse rounded-full bg-blue-500" />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex min-h-[45vh] flex-col items-center justify-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 text-center">
+              <p className="text-sm font-medium text-amber-900">暂时无法预览此文档</p>
+              <p className="max-w-lg text-xs leading-relaxed text-amber-700">
+                {canEdit ? (doc.processingError || '请重新上传文件；如果仍然失败，请联系系统管理员。') : '请联系文档管理员重新处理文件。'}
+              </p>
+              {canEdit && (
+                <div className="mt-2 flex flex-wrap justify-center gap-2">
+                  <input
+                    ref={replacementInputRef}
+                    type="file"
+                    accept=".docx,.ppt,.pptx,.pdf,.xls,.xlsx"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (!file) return
+                      setReplacementFile(file)
+                      void handleReplacementFile(file)
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => replacementFile
+                      ? void handleReplacementFile(replacementFile)
+                      : replacementInputRef.current?.click()}
+                    disabled={replacingFile}
+                    className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 bg-white px-4 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {replacingFile ? '正在重新处理…' : replacementFile ? `重试：${replacementFile.name}` : '替换文件并重试'}
+                  </button>
+                  {replacementFile && !replacingFile && (
+                    <button
+                      type="button"
+                      onClick={() => replacementInputRef.current?.click()}
+                      className="inline-flex min-h-[44px] items-center rounded-lg border border-amber-300 px-4 text-sm text-amber-800 hover:bg-amber-100"
+                    >
+                      重新选择文件
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleFailedPreviewDownload()}
+                    disabled={downloadingOriginal}
+                    className="inline-flex min-h-[44px] items-center rounded-lg bg-amber-800 px-4 text-sm font-medium text-white hover:bg-amber-900"
+                  >
+                    {downloadingOriginal ? '下载中…' : '下载原文件'}
+                  </button>
+                </div>
+              )}
+              {recoveryMessage && <p role="status" className="text-xs text-emerald-700">{recoveryMessage}</p>}
+              {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
+            </div>
+          )
         ) : (
           /* Markdown 文档：ReactMarkdown 渲染 */
           <article className="doc-content max-w-none overflow-x-auto">

@@ -86,6 +86,34 @@ export async function getFolderPermission(user: SessionUser, folderId: string): 
   return best
 }
 
+/** Resolve many folder permissions from one cached folder-tree query. */
+export async function getFolderPermissionsForDocuments(
+  user: SessionUser,
+  folderIds: Array<string | null>,
+): Promise<Map<string, Permission | null>> {
+  const uniqueIds = [...new Set(folderIds.filter((id): id is string => Boolean(id)))]
+  if (user.role === 'super_admin') return new Map(uniqueIds.map(id => [id, 'admin' as Permission]))
+  const allFolders = await getFolderPermRules()
+  const folderMap = new Map(allFolders.map(folder => [folder.folderId, folder]))
+  const result = new Map<string, Permission | null>()
+  for (const folderId of uniqueIds) {
+    let best: Permission | null = null
+    let currentId: string | null = folderId
+    while (currentId) {
+      const folder = folderMap.get(currentId)
+      if (!folder) break
+      for (const rule of folder.rules) {
+        const matched = matchRule(rule, user)
+        if (matched && (!best || PERM_LEVEL[matched] > PERM_LEVEL[best])) best = matched
+      }
+      if (!folder.inheritPermissions) break
+      currentId = folder.parentId
+    }
+    result.set(folderId, best)
+  }
+  return result
+}
+
 export async function getUserAccessibleFolderIds(user: SessionUser): Promise<string[]> {
   if (user.role === 'super_admin') {
     const folders = await prisma.folder.findMany({ select: { id: true } })

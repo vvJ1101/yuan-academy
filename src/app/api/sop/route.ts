@@ -4,10 +4,10 @@ import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const where = buildDocumentWhere(session)
+  const where = await buildDocumentWhere(session)
   const { searchParams } = new URL(req.url)
   const stage = searchParams.get('stage')
 

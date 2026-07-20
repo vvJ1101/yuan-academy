@@ -7,7 +7,7 @@
  * Production server (Ubuntu): apt-get install -y libreoffice-impress libreoffice-common
  */
 
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { writeFileSync, copyFileSync, existsSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -30,7 +30,7 @@ function findSoffice(): string | null {
   ]
   for (const c of candidates) {
     try {
-      execSync(`"${c}" --version 2>/dev/null`, { stdio: 'pipe', timeout: 3000 })
+      execFileSync(c, ['--version'], { stdio: 'pipe', timeout: 3000 })
       return c
     } catch {
       continue
@@ -43,12 +43,14 @@ function findSoffice(): string | null {
  * Convert a PPT/PPTX buffer to PDF.
  *
  * @param buffer - Raw file buffer
+ * @param extension - Original PowerPoint extension
  * @param docId - Document ID for output path
  * @param docDir - Absolute path to the document's upload directory
  * @returns Conversion result
  */
 export async function convertPptToPdf(
   buffer: Buffer,
+  extension: 'ppt' | 'pptx',
   docId: string,
   docDir: string
 ): Promise<ConversionResult> {
@@ -56,12 +58,12 @@ export async function convertPptToPdf(
   if (!soffice) {
     return {
       success: false,
-      error: 'LibreOffice 未安装，无法转换 PPT 文件。服务器上请执行: apt-get install -y libreoffice-impress libreoffice-common',
+      error: 'LibreOffice 未安装，无法转换 PPT 文件',
     }
   }
 
   const tmpDir = join(tmpdir(), `ppt-convert-${docId}-${uuidv4()}`)
-  const inputPath = join(tmpDir, 'input.pptx')
+  const inputPath = join(tmpDir, `input.${extension}`)
   const outputPath = join(tmpDir, 'input.pdf')
 
   try {
@@ -70,10 +72,9 @@ export async function convertPptToPdf(
     writeFileSync(inputPath, buffer)
 
     // 2. Convert via LibreOffice
-    execSync(
-      `"${soffice}" --headless --norestore --convert-to pdf --outdir "${tmpDir}" "${inputPath}"`,
-      { stdio: 'pipe', timeout: 120_000 } // 2 min timeout for large files
-    )
+    execFileSync(soffice, ['--headless', '--norestore', '--convert-to', 'pdf', '--outdir', tmpDir, inputPath], {
+      stdio: 'pipe', timeout: 120_000,
+    })
 
     if (!existsSync(outputPath)) {
       return { success: false, error: 'PPT 转换失败：LibreOffice 未生成 PDF 文件' }
@@ -81,14 +82,14 @@ export async function convertPptToPdf(
 
     // 3. Copy PDF to doc directory
     if (!existsSync(docDir)) mkdirSync(docDir, { recursive: true })
-    const destPath = join(docDir, 'output.pdf')
+    const destPath = join(docDir, 'preview.pdf')
     copyFileSync(outputPath, destPath)
 
-    return { success: true, pdfPath: `/uploads/documents/${docId}/output.pdf` }
-  } catch (err: any) {
+    return { success: true }
+  } catch {
     return {
       success: false,
-      error: `PPT 转换失败: ${err.message || '未知错误'}`,
+      error: 'PPT 转换失败，请稍后重试',
     }
   } finally {
     // 4. Cleanup temp files
