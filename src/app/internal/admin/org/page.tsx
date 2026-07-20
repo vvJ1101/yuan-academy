@@ -16,6 +16,10 @@ interface Department {
   _count: { users: number }
 }
 
+function can(permissions: string[], key: string) {
+  return permissions.includes('*') || permissions.includes(key)
+}
+
 export default function OrgPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -34,15 +38,27 @@ export default function OrgPage() {
   const [message, setMessage] = useState('')
   const [msgType, setMsgType] = useState<'success' | 'error'>('success')
   const [expandedComp, setExpandedComp] = useState<Set<string>>(new Set())
+  const [permissions, setPermissions] = useState<string[]>([])
+
+  const canCreateCompany = can(permissions, 'org.companyCreate')
+  const canEditCompany = can(permissions, 'org.companyEdit')
+  const canDeleteCompany = can(permissions, 'org.companyDelete')
+  const canCreateDepartment = can(permissions, 'org.departmentCreate')
+  const canEditDepartment = can(permissions, 'org.departmentEdit')
+  const canDeleteDepartment = can(permissions, 'org.departmentDelete')
+  const canManageUsers = can(permissions, 'menu.admin.users')
 
   async function loadData() {
     try {
-      const [cRes, dRes] = await Promise.all([
+      const [meRes, cRes, dRes] = await Promise.all([
+        fetch('/api/auth/me'),
         fetch('/api/companies'),
         fetch('/api/departments'),
       ])
+      const meData = await meRes.json()
       const cData = await cRes.json()
       const dData = await dRes.json()
+      if (Array.isArray(meData?.permissions)) setPermissions(meData.permissions)
       if (Array.isArray(cData)) setCompanies(cData)
       if (Array.isArray(dData)) setDepartments(dData)
     } catch {
@@ -60,17 +76,33 @@ export default function OrgPage() {
 
   // ── Company CRUD ──
   function openNewComp() {
+    if (!canCreateCompany) {
+      showMsg('error', '你没有添加公司的权限')
+      return
+    }
     setEditingComp(null)
     setCompForm({ name: '', slug: '', description: '' })
     setShowCompForm(true)
   }
   function openEditComp(c: Company) {
+    if (!canEditCompany) {
+      showMsg('error', '你没有编辑公司的权限')
+      return
+    }
     setEditingComp(c)
     setCompForm({ name: c.name, slug: c.slug, description: c.description || '' })
     setShowCompForm(true)
   }
   async function saveComp(e: React.FormEvent) {
     e.preventDefault()
+    if (editingComp && !canEditCompany) {
+      showMsg('error', '你没有编辑公司的权限')
+      return
+    }
+    if (!editingComp && !canCreateCompany) {
+      showMsg('error', '你没有添加公司的权限')
+      return
+    }
     const method = editingComp ? 'PUT' : 'POST'
     const body = editingComp ? { id: editingComp.id, ...compForm } : compForm
     try {
@@ -92,6 +124,10 @@ export default function OrgPage() {
     }
   }
   async function deleteComp(c: Company) {
+    if (!canDeleteCompany) {
+      showMsg('error', '你没有删除公司的权限')
+      return
+    }
     if (!confirm(`确定删除公司「${c.name}」？此操作将同时删除所有关联部门和用户。`)) return
     try {
       const res = await fetch(`/api/companies?id=${c.id}`, { method: 'DELETE' })
@@ -104,17 +140,33 @@ export default function OrgPage() {
 
   // ── Department CRUD ──
   function openNewDept(companyId?: string) {
+    if (!canCreateDepartment) {
+      showMsg('error', '你没有添加部门的权限')
+      return
+    }
     setEditingDept(null)
     setDeptForm({ name: '', slug: '', companyId: companyId || (companies[0]?.id || ''), description: '' })
     setShowDeptForm(true)
   }
   function openEditDept(d: Department) {
+    if (!canEditDepartment) {
+      showMsg('error', '你没有编辑部门的权限')
+      return
+    }
     setEditingDept(d)
     setDeptForm({ name: d.name, slug: d.slug, companyId: d.companyId, description: '' })
     setShowDeptForm(true)
   }
   async function saveDept(e: React.FormEvent) {
     e.preventDefault()
+    if (editingDept && !canEditDepartment) {
+      showMsg('error', '你没有编辑部门的权限')
+      return
+    }
+    if (!editingDept && !canCreateDepartment) {
+      showMsg('error', '你没有添加部门的权限')
+      return
+    }
     const method = editingDept ? 'PUT' : 'POST'
     const body = editingDept ? { id: editingDept.id, ...deptForm } : deptForm
     try {
@@ -136,6 +188,10 @@ export default function OrgPage() {
     }
   }
   async function deleteDept(d: Department) {
+    if (!canDeleteDepartment) {
+      showMsg('error', '你没有删除部门的权限')
+      return
+    }
     if (!confirm(`确定删除部门「${d.name}」？`)) return
     try {
       const res = await fetch(`/api/departments?id=${d.id}`, { method: 'DELETE' })
@@ -187,11 +243,13 @@ export default function OrgPage() {
           <h1 className="text-[1.4rem] font-semibold tracking-[-0.02em] text-[#111]">组织架构</h1>
           <p className="text-[0.85rem] text-neutral-500 mt-1">管理公司、部门与用户</p>
         </div>
-        <Link href="/internal/admin/users"
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors no-underline">
-          <Users size={15} strokeWidth={1.5} />
-          用户管理
-        </Link>
+        {canManageUsers && (
+          <Link href="/internal/admin/users"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors no-underline">
+            <Users size={15} strokeWidth={1.5} />
+            用户管理
+          </Link>
+        )}
       </div>
 
       {message && (
@@ -209,11 +267,13 @@ export default function OrgPage() {
             <Building2 size={14} strokeWidth={1.5} />
             公司 ({companies.length})
           </h2>
-          <button onClick={openNewComp}
-            className="inline-flex items-center gap-1 px-3 py-1.5 text-[0.72rem] font-medium text-[#2563EB] bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
-            <Plus size={13} strokeWidth={1.5} />
-            添加公司
-          </button>
+          {canCreateCompany && (
+            <button onClick={openNewComp}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-[0.72rem] font-medium text-[#2563EB] bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+              <Plus size={13} strokeWidth={1.5} />
+              添加公司
+            </button>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -237,21 +297,27 @@ export default function OrgPage() {
                     <span className="inline-flex items-center gap-1"><Users size={12} strokeWidth={1.5} />{c._count.users} 人</span>
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => openNewDept(c.id)}
-                      className="p-1.5 text-neutral-400 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors"
-                      title="添加部门">
-                      <Plus size={15} strokeWidth={1.5} />
-                    </button>
-                    <button onClick={() => openEditComp(c)}
-                      className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                      title="编辑公司">
-                      <Pencil size={14} strokeWidth={1.5} />
-                    </button>
-                    <button onClick={() => deleteComp(c)}
-                      className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      title="删除公司">
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </button>
+                    {canCreateDepartment && (
+                      <button onClick={() => openNewDept(c.id)}
+                        className="p-1.5 text-neutral-400 hover:text-[#2563EB] hover:bg-blue-50 rounded-lg transition-colors"
+                        title="添加部门">
+                        <Plus size={15} strokeWidth={1.5} />
+                      </button>
+                    )}
+                    {canEditCompany && (
+                      <button onClick={() => openEditComp(c)}
+                        className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                        title="编辑公司">
+                        <Pencil size={14} strokeWidth={1.5} />
+                      </button>
+                    )}
+                    {canDeleteCompany && (
+                      <button onClick={() => deleteComp(c)}
+                        className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="删除公司">
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -269,14 +335,18 @@ export default function OrgPage() {
                           <Users size={11} strokeWidth={1.5} />{d._count.users} 人
                         </span>
                         <div className="flex items-center gap-0.5">
-                          <button onClick={() => openEditDept(d)}
-                            className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
-                            <Pencil size={13} strokeWidth={1.5} />
-                          </button>
-                          <button onClick={() => deleteDept(d)}
-                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                            <Trash2 size={13} strokeWidth={1.5} />
-                          </button>
+                          {canEditDepartment && (
+                            <button onClick={() => openEditDept(d)}
+                              className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
+                              <Pencil size={13} strokeWidth={1.5} />
+                            </button>
+                          )}
+                          {canDeleteDepartment && (
+                            <button onClick={() => deleteDept(d)}
+                              className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                              <Trash2 size={13} strokeWidth={1.5} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -285,7 +355,7 @@ export default function OrgPage() {
 
                 {isExpanded && compDepts.length === 0 && (
                   <div className="border-t border-neutral-100 bg-neutral-50/30 px-4 py-3 ml-10">
-                    <p className="text-[0.75rem] text-neutral-400">暂无部门，点击 + 添加</p>
+                    <p className="text-[0.75rem] text-neutral-400">{canCreateDepartment ? '暂无部门，点击 + 添加' : '暂无部门'}</p>
                   </div>
                 )}
               </div>
@@ -296,10 +366,12 @@ export default function OrgPage() {
             <div className="text-center py-10 bg-white rounded-xl border border-dashed border-neutral-300">
               <Building2 size={28} strokeWidth={1} className="text-neutral-300 mx-auto mb-2" />
               <p className="text-[0.85rem] text-neutral-500">暂无公司</p>
-              <button onClick={openNewComp}
-                className="mt-3 px-4 py-2 bg-[#2563EB] text-white text-[0.75rem] font-medium rounded-lg hover:bg-blue-600">
-                创建第一个公司
-              </button>
+              {canCreateCompany && (
+                <button onClick={openNewComp}
+                  className="mt-3 px-4 py-2 bg-[#2563EB] text-white text-[0.75rem] font-medium rounded-lg hover:bg-blue-600">
+                  创建第一个公司
+                </button>
+              )}
             </div>
           )}
         </div>

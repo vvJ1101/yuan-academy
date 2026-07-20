@@ -21,6 +21,10 @@ interface FolderPerm {
 const permLabels: Record<string, string> = { view: '查看', upload: '上传', edit: '编辑', delete: '删除', admin: '管理' }
 const permOptions = ['view', 'upload', 'edit', 'delete', 'admin']
 
+function can(permissions: string[], key: string) {
+  return permissions.includes('*') || permissions.includes(key)
+}
+
 export default function FoldersPage() {
   const [folders, setFolders] = useState<Folder[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
@@ -42,13 +46,22 @@ export default function FoldersPage() {
   const [permDeptId, setPermDeptId] = useState('')
   const [permLevel, setPermLevel] = useState('view')
   const [showPermPanel, setShowPermPanel] = useState(false)
+  const [message, setMessage] = useState('')
+  const [permissions, setPermissions] = useState<string[]>([])
+
+  const canCreateFolder = can(permissions, 'folder.create')
+  const canEditFolder = can(permissions, 'folder.edit')
+  const canDeleteFolder = can(permissions, 'folder.delete')
+  const canManageFolderPermissions = can(permissions, 'folder.permissionManage')
 
   const loadData = () => {
     Promise.all([
+      fetch('/api/auth/me').then(r => r.json()),
       fetch('/api/folders').then(r => r.json()),
       fetch('/api/companies').then(r => r.json()),
       fetch('/api/departments').then(r => r.json()),
-    ]).then(([f, c, d]) => {
+    ]).then(([me, f, c, d]) => {
+      if (Array.isArray(me?.permissions)) setPermissions(me.permissions)
       setFolders(f.folders || [])
       if (Array.isArray(c)) setCompanies(c)
       if (Array.isArray(d)) setDepts(d)
@@ -58,6 +71,10 @@ export default function FoldersPage() {
   useEffect(() => { loadData() }, [])
 
   const loadPerms = async (folderId: string) => {
+    if (!canManageFolderPermissions) {
+      setMessage('你没有管理文件夹权限规则的权限')
+      return
+    }
     setPermFolderId(folderId)
     const res = await fetch(`/api/folders/permissions?folderId=${folderId}`)
     const d = await res.json()
@@ -67,6 +84,10 @@ export default function FoldersPage() {
 
   const addPerm = async () => {
     if (!permFolderId) return
+    if (!canManageFolderPermissions) {
+      setMessage('你没有添加文件夹权限规则的权限')
+      return
+    }
     await fetch('/api/folders/permissions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -81,6 +102,10 @@ export default function FoldersPage() {
   }
 
   const delPerm = async (id: string) => {
+    if (!canManageFolderPermissions) {
+      setMessage('你没有删除文件夹权限规则的权限')
+      return
+    }
     await fetch(`/api/folders/permissions?id=${id}`, { method: 'DELETE' })
     if (permFolderId) loadPerms(permFolderId)
   }
@@ -89,6 +114,14 @@ export default function FoldersPage() {
 
   const handleSave = async () => {
     if (!name.trim()) return
+    if (editingId && !canEditFolder) {
+      setMessage('你没有编辑文件夹的权限')
+      return
+    }
+    if (!editingId && !canCreateFolder) {
+      setMessage('你没有新建文件夹的权限')
+      return
+    }
     if (editingId) {
       await fetch('/api/folders', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -104,12 +137,20 @@ export default function FoldersPage() {
   }
 
   const handleDelete = async (id: string) => {
+    if (!canDeleteFolder) {
+      setMessage('你没有删除文件夹的权限')
+      return
+    }
     if (!confirm('删除此文件夹？子文件夹和文档将移至上级。')) return
     await fetch(`/api/folders?id=${id}`, { method: 'DELETE' })
     loadData()
   }
 
   const openEdit = (f: Folder) => {
+    if (!canEditFolder) {
+      setMessage('你没有编辑文件夹的权限')
+      return
+    }
     setEditingId(f.id); setName(f.name); setParentId(f.parentId); setCompanyId(f.companyId); setInherit(f.inheritPermissions); setShowAdd(true)
   }
 
@@ -125,15 +166,23 @@ export default function FoldersPage() {
       <PageHeader title="文件夹管理" backTo="/internal/admin" backLabel="返回管理中心" />
       <div className="flex items-center justify-between mb-6">
         <div><h1 className="text-[1.4rem] font-semibold tracking-[-0.02em] text-[#111]"><Folder size={22} strokeWidth={1.5} className="text-[#2563EB] inline mr-2" />文件夹管理</h1><p className="text-[0.82rem] text-neutral-500 mt-1">{folders.length} 个文件夹</p></div>
-        <button onClick={() => { resetForm(); setShowAdd(true) }} className="px-4 py-2 bg-[#2563EB] text-white text-[0.78rem] font-medium rounded-lg hover:bg-blue-600">+ 新建文件夹</button>
+        {canCreateFolder && (
+          <button onClick={() => { resetForm(); setShowAdd(true) }} className="px-4 py-2 bg-[#2563EB] text-white text-[0.78rem] font-medium rounded-lg hover:bg-blue-600">+ 新建文件夹</button>
+        )}
       </div>
+
+      {message && (
+        <div className="mb-4 px-4 py-2.5 rounded-lg text-[0.8rem] font-medium bg-red-50 text-red-600 border border-red-100">
+          {message}
+        </div>
+      )}
 
       {/* Folder Tree */}
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
         {topLevelFolders.length === 0 ? (
-          <p className="px-5 py-12 text-[0.85rem] text-neutral-400 text-center">暂无文件夹，点击上方按钮创建</p>
+          <p className="px-5 py-12 text-[0.85rem] text-neutral-400 text-center">{canCreateFolder ? '暂无文件夹，点击上方按钮创建' : '暂无文件夹'}</p>
         ) : (
-          topLevelFolders.map(f => <FolderRow key={f.id} folder={f} children={childrenOf(f.id)} level={0} onEdit={openEdit} onDelete={handleDelete} onPermissions={loadPerms} allFolders={folders} />)
+          topLevelFolders.map(f => <FolderRow key={f.id} folder={f} children={childrenOf(f.id)} level={0} onEdit={openEdit} onDelete={handleDelete} onPermissions={loadPerms} allFolders={folders} permissions={permissions} />)
         )}
       </div>
 
@@ -196,13 +245,16 @@ export default function FoldersPage() {
 }
 
 // Recursive folder row
-function FolderRow({ folder, children, level, onEdit, onDelete, onPermissions, allFolders }: {
+function FolderRow({ folder, children, level, onEdit, onDelete, onPermissions, allFolders, permissions }: {
   folder: Folder; children: Folder[]; level: number
   onEdit: (f: Folder) => void; onDelete: (id: string) => void; onPermissions: (id: string) => void
-  allFolders: Folder[]
+  allFolders: Folder[]; permissions: string[]
 }) {
   const [expanded, setExpanded] = useState(true)
   const indent = level * 20
+  const canEditFolder = can(permissions, 'folder.edit')
+  const canDeleteFolder = can(permissions, 'folder.delete')
+  const canManageFolderPermissions = can(permissions, 'folder.permissionManage')
 
   return (
     <>
@@ -219,13 +271,13 @@ function FolderRow({ folder, children, level, onEdit, onDelete, onPermissions, a
           <p className="text-[0.68rem] text-neutral-400">{folder._count.documents} 文档 · {folder._count.children} 子文件夹</p>
         </div>
         <div className="flex items-center gap-0.5 pr-3 shrink-0">
-          <button onClick={() => onPermissions(folder.id)} className="px-2 py-1 text-[0.68rem] text-neutral-400 hover:text-neutral-600 rounded"><Lock size={14} strokeWidth={1.5} /></button>
-          <button onClick={() => onEdit(folder)} className="px-2 py-1 text-neutral-400 hover:text-neutral-600 rounded"><Pencil size={14} strokeWidth={1.5} /></button>
-          <button onClick={() => onDelete(folder.id)} className="px-2 py-1 text-[0.68rem] text-neutral-400 hover:text-red-600 rounded"><Trash2 size={14} strokeWidth={1.5} /></button>
+          {canManageFolderPermissions && <button onClick={() => onPermissions(folder.id)} className="px-2 py-1 text-[0.68rem] text-neutral-400 hover:text-neutral-600 rounded"><Lock size={14} strokeWidth={1.5} /></button>}
+          {canEditFolder && <button onClick={() => onEdit(folder)} className="px-2 py-1 text-neutral-400 hover:text-neutral-600 rounded"><Pencil size={14} strokeWidth={1.5} /></button>}
+          {canDeleteFolder && <button onClick={() => onDelete(folder.id)} className="px-2 py-1 text-[0.68rem] text-neutral-400 hover:text-red-600 rounded"><Trash2 size={14} strokeWidth={1.5} /></button>}
         </div>
       </div>
       {expanded && children.map(child => (
-        <FolderRow key={child.id} folder={child} children={allFolders.filter(f => f.parentId === child.id)} level={level + 1} onEdit={onEdit} onDelete={onDelete} onPermissions={onPermissions} allFolders={allFolders} />
+        <FolderRow key={child.id} folder={child} children={allFolders.filter(f => f.parentId === child.id)} level={level + 1} onEdit={onEdit} onDelete={onDelete} onPermissions={onPermissions} allFolders={allFolders} permissions={permissions} />
       ))}
     </>
   )
