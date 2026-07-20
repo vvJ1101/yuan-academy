@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
-import { canReadDocument } from '@/lib/permissions/documents'
+import { buildDocumentWhere, canReadDocument } from '@/lib/permissions/documents'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromCookies(req.headers.get('cookie'))
@@ -16,6 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (!canReadDocument(session, doc)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const documentWhere = await buildDocumentWhere(session)
 
   // Parse graph edges from JSON fields
   let prerequisites: string[] = []
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   // Find docs with same processStage
   const sameStage = doc.processStage
     ? await prisma.document.findMany({
-        where: { processStage: doc.processStage, id: { not: doc.id } },
+        where: { AND: [{ processStage: doc.processStage, id: { not: doc.id } }, documentWhere] },
         select: { id: true, title: true, slug: true, processStage: true,
           ownerDept: { select: { name: true } },
           audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
@@ -36,7 +37,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Find docs that have this doc as prerequisite
   const dependentDocs = await prisma.document.findMany({
-    where: { prerequisites: { contains: doc.id } },
+    where: { AND: [{ prerequisites: { contains: doc.id } }, documentWhere] },
     select: { id: true, title: true, slug: true,
       ownerDept: { select: { name: true } },
       audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
@@ -47,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const allEdgeIds = [...prerequisites, ...relatedDocs]
   const edgeDocs = allEdgeIds.length > 0
     ? await prisma.document.findMany({
-        where: { id: { in: allEdgeIds } },
+        where: { AND: [{ id: { in: allEdgeIds } }, documentWhere] },
         select: { id: true, title: true, slug: true, processStage: true, riskLevel: true,
           ownerDept: { select: { name: true } },
           audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       prerequisites: prerequisites.map(id => edgeMap.get(id)).filter(Boolean),
       relatedDocs: relatedDocs.map(id => edgeMap.get(id)).filter(Boolean),
       dependents: dependentDocs,
-      sameStage: sameStage.filter(d => canReadDocument(session, d)),
+      sameStage,
     },
   })
 }
