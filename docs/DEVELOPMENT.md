@@ -90,7 +90,12 @@ git revert df8000a
 
 ## 品牌资料中心
 
-品牌资料统一入口为 `/internal/brand`。`type=contact` 展示品牌对接信息，市场部接口只返回基础信息与黄色字段，商品部/管理员可查看完整字段并上传 Excel。
+品牌资料在左侧导航统一归到“品牌资料”。当前状态：
+
+- 订货政策仍使用兼容路由 `/internal/policy`，保留原有编辑、上传、导出、复制和筛选能力。
+- 品牌对接信息使用 `/internal/brand?type=contact`，市场部接口只返回基础信息与黄色字段，商品部/管理员可查看完整字段并上传 Excel。
+- 两个页面顶部共用 `BrandTabs`，可在“订货政策”和“品牌对接信息”之间直接切换。
+- 后续若要完全收敛路由，可将 `/internal/brand?type=ordering` 改为承载订货政策内容，再让 `/internal/policy` 做兼容跳转。
 
 品牌对接信息文件存储在：
 

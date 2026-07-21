@@ -83,7 +83,7 @@
 | AI 助手 | `/internal/ai` | `menu.ai` | 可见文档范围 | AI 搜索、推荐、风险分析都不能越权引用文档 |
 | 品牌资料 | `/internal/brand` | `menu.brand` | 品牌资料范围 | 父级入口 |
 | 品牌对接信息 | `/internal/brand?type=contact` | `menu.brand.contact` | 字段范围 + 品牌资料范围 | 市场字段/完整字段分权 |
-| 订货政策 | `/internal/policy` | `menu.brand.ordering` | 品牌资料范围 | 查看、编辑、上传、导出、删除分开控 |
+| 订货政策 | `/internal/policy` | `menu.brand.ordering` | 品牌资料范围 | 查看、编辑、上传、导出、删除分开控；页面顶部可直接切到品牌对接信息 |
 | 订货政策上传 | `/internal/policy-upload` | `menu.brand.ordering` + `brandOrdering.upload` | 品牌资料范围 | 页面入口和上传按钮都需权限 |
 | 管理中心 | `/internal/admin` | `menu.admin` | 管理数据范围 | 卡片入口需按子权限显示 |
 | 用户管理 | `/internal/admin/users` | `menu.admin.users` | 可管理用户范围 | 用户增删改按钮独立控制 |
