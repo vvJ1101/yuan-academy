@@ -230,7 +230,7 @@ export const ALL_PERMISSION_KEYS = {
     { key: 'menu.recent', label: '最近访问' },
     { key: 'menu.favorites', label: '我的收藏' },
     { key: 'menu.workspace', label: '我的工作区' },
-    { key: 'menu.documents', label: '文档管理' },
+    { key: 'menu.documents', label: '文档中心' },
     { key: 'menu.search', label: '全局搜索' },
     { key: 'menu.ai', label: 'AI 助手' },
     { key: 'menu.brand', label: '品牌资料' },

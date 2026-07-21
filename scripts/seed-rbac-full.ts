@@ -46,7 +46,7 @@ async function main() {
     {
       name: '知识中心', type: 1, icon: 'knowledge', sort: 2,
       children: [
-        { name: '我的上传', type: 2, path: '/internal/documents', permission: 'menu.documents', sort: 1 },
+        { name: '文档中心', type: 2, path: '/internal/documents', permission: 'menu.documents', sort: 1 },
         { name: '上传文档', type: 3, permission: 'document.upload', sort: 2 },
         { name: '编辑文档', type: 3, permission: 'document.edit', sort: 3 },
         { name: '删除文档', type: 3, permission: 'document.delete', sort: 4 },

@@ -3,21 +3,13 @@
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState, useRef } from 'react'
-import { Folder, Home, Clock, Star, Upload, ChevronDown, ChevronRight, Layout, Wrench, Loader2, ScrollText } from 'lucide-react'
+import { Folder, ChevronDown, ChevronRight, Loader2, ScrollText } from 'lucide-react'
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
 import { TreeFolder } from '@/components/internal/TreeFolder'
-import { BRAND_LINKS } from '@/components/internal/sidebar-links'
+import { BRAND_LINKS, QUICK_LINKS } from '@/components/internal/sidebar-links'
 
 interface FolderItem { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
-
-const QUICK_LINKS = [
-  { href: '/internal/dashboard', label: '首页', Icon: Home, perm: 'menu.dashboard', permKey: 'menu.dashboard' },
-  { href: '/internal/recent', label: '最近访问', Icon: Clock, perm: 'menu.recent', permKey: 'menu.recent' },
-  { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'menu.favorites' },
-  { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'menu.documents' },
-  { href: '/internal/admin', label: '管理中心', Icon: Wrench, perm: 'menu.admin', permKey: 'admin' },
-]
 
 export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname() || ''

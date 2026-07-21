@@ -74,7 +74,7 @@
 | 首页 | `/internal/dashboard` | `menu.dashboard` | 可见文档范围 | 统计卡片、推荐内容必须过滤到可见数据 |
 | 最近访问 | `/internal/recent` | `menu.recent` | 可见文档范围 | 只显示用户有权访问的浏览记录 |
 | 我的收藏 | `/internal/favorites` | `menu.favorites` | 可见文档范围 | 收藏列表仍需二次过滤文档权限 |
-| 我的上传 / 文档中心 | `/internal/documents` | `menu.documents` | 文件夹/文档范围 | 文件夹树和文档列表按权限过滤 |
+| 文档中心 | `/internal/documents` | `menu.documents` | 文件夹/文档范围 | 文件夹树和文档列表按权限过滤 |
 | 文档详情 | `/internal/documents/[id]` | `menu.documents` + 文档 view 权限 | 目标文档 | 无文档权限不得访问详情 |
 | 旧文档详情 | `/internal/docs/[department]/[slug]` | `menu.documents` + 文档 view 权限 | 目标文档 | 旧入口也要走同一文档权限 |
 | 搜索 | `/internal/search` | `menu.search` | 可见文档范围 | 搜索结果必须过滤权限 |

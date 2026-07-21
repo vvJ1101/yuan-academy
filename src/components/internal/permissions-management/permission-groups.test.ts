@@ -38,7 +38,7 @@ const tree: MenuNode[] = [
     sort: 2,
     path: null,
     children: [
-      { id: 'docs', parentId: 'knowledge-root', name: '我的上传', type: 2, permission: 'menu.documents', icon: null, sort: 1, path: '/internal/documents' },
+      { id: 'docs', parentId: 'knowledge-root', name: '文档中心', type: 2, permission: 'menu.documents', icon: null, sort: 1, path: '/internal/documents' },
     ],
   },
 ]
