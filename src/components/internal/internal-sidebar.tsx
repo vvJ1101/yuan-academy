@@ -6,7 +6,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Folder, ChevronDown, ChevronRight, Loader2, ScrollText } from 'lucide-react'
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
 import { TreeFolder } from '@/components/internal/TreeFolder'
-import { BRAND_LINKS, QUICK_LINKS } from '@/components/internal/sidebar-links'
+import { BRAND_LINKS, QUICK_LINKS, isSectionExpanded } from '@/components/internal/sidebar-links'
 
 interface FolderItem { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
@@ -18,6 +18,7 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [folders, setFolders] = useState<FolderItem[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [activeId, setActiveId] = useState('')
   const [ctxMenu, setCtxMenu] = useState<any>(null)
   const [permTarget, setPermTarget] = useState<any>(null)
@@ -247,7 +248,11 @@ function PermBadge({ perm }: { perm: string }) {
     || pathname.startsWith('/internal/brand/')
     || pathname === '/internal/policy'
     || pathname.startsWith('/internal/policy/')
-  const brandExpanded = brandOpen || expanded.has('brand-data')
+  const brandExpanded = isSectionExpanded({
+    isActive: brandOpen,
+    expanded: expanded.has('brand-data'),
+    collapsed: collapsed.has('brand-data'),
+  })
   const activeBrandType = pathname === '/internal/policy'
     || pathname.startsWith('/internal/policy/')
     ? 'ordering'
@@ -279,7 +284,15 @@ function PermBadge({ perm }: { perm: string }) {
             <div className="mt-1">
               <button
                 type="button"
-                onClick={() => toggle('brand-data')}
+                onClick={() => {
+                  if (brandExpanded) {
+                    setCollapsed(prev => { const next = new Set(prev); next.add('brand-data'); return next })
+                    setExpanded(prev => { const next = new Set(prev); next.delete('brand-data'); return next })
+                  } else {
+                    setCollapsed(prev => { const next = new Set(prev); next.delete('brand-data'); return next })
+                    setExpanded(prev => { const next = new Set(prev); next.add('brand-data'); return next })
+                  }
+                }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] text-neutral-700 ${brandOpen ? 'bg-neutral-50' : 'hover:bg-neutral-50'}`}
               >
                 <ScrollText size={16} strokeWidth={1.5} />
