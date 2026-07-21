@@ -9,7 +9,7 @@
 | **SSH 用户** | 从安全的密码管理器或运维平台获取 |
 | **SSH 凭据** | 禁止写入本文档或提交到 Git |
 | **项目路径** | `/var/www/yuan-academy` |
-| **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
+| **PM2 进程名** | `yuan-academy-blue`、`yuan-academy-green`（蓝绿双实例，512MB 上限） |
 
 ## 环境变量（生产）
 
@@ -138,13 +138,22 @@ ssh root@120.79.162.27 "
 
 ### 无感部署方向（蓝绿发布）
 
-当前 `scripts/deploy-local.sh` 是“本地构建 + 上传构建包 + 替换 `.next` + PM2 单实例重启”。它有健康检查和失败回滚，但 PM2 重启的几秒内仍可能短暂不可用。
+旧的 `scripts/deploy-local.sh` 是“本地构建 + 上传构建包 + 替换 `.next` + PM2 单实例重启”。它有健康检查和失败回滚，但 PM2 重启的几秒内仍可能短暂不可用。
+
+生产环境已在 2026-07-21 初始化为蓝绿结构：
+
+- 当前线上颜色由 `/var/www/yuan-academy-current` 记录。
+- 当前 live 目录由 `/var/www/yuan-academy-live` 软链接指向。
+- `blue` 使用 `/var/www/yuan-academy-blue` 和端口 `3001`。
+- `green` 使用 `/var/www/yuan-academy-green` 和端口 `3003`。
+- nginx 通过 `/etc/nginx/conf.d/yuan-academy-upstream.conf` 切换 `yuan_academy_upstream`。
+- `3002` 属于官网 `yuan-website`，不得用于 Academy。
 
 若要做到用户无感，建议改成蓝绿发布：
 
 1. 生产保留两个运行目录，例如 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green`。
 2. 当前线上实例继续服务旧版本，例如 `yuan-academy-blue` 监听 `3001`。
-3. 新版本部署到备用目录，例如 `yuan-academy-green`，监听备用端口 `3002`。
+3. 新版本部署到备用目录，例如 `yuan-academy-green`，监听备用端口 `3003`；`3002` 已被官网 `yuan-website` 使用，不作为 Academy 备用端口。
 4. 先对备用端口做健康检查：`/login` 必须返回 `200`，受保护 API 匿名访问必须返回 `401`。
 5. 健康检查通过后，只切换 nginx upstream 到新端口并执行 `nginx -s reload`；reload 是平滑的，旧连接不会被立即断开。
 6. 保留旧实例一段时间，确认无异常后再停止；如新版本异常，立刻把 nginx upstream 切回旧端口。
@@ -156,7 +165,7 @@ ssh root@120.79.162.27 "
 - 蓝绿部署脚本：选择空闲颜色、部署、启动备用端口、健康检查、切换 nginx、记录当前颜色。
 - 回滚脚本：只切 nginx 回旧颜色，不重新构建。
 
-在蓝绿部署脚本完成前，生产部署仍按本文档现有脚本执行；如果网站已经不可用，优先恢复服务，再做蓝绿改造。
+生产部署优先使用蓝绿脚本；如果网站已经不可用，优先恢复服务，再按备份和 upstream 状态回滚。
 
 ### 蓝绿部署脚本（试运行/预部署）
 
@@ -169,6 +178,8 @@ ssh root@120.79.162.27 "
 - `--activate` 会切换 nginx，属于生产流量变更，执行前必须得到明确确认。
 - `--activate` 前要求 nginx 已经使用 `yuan_academy_upstream` upstream；如果服务器还没做一次性 nginx 初始化，脚本会拒绝切换。
 - 脚本会排除 `.env*`、`prisma/dev.db*`、`public/uploads/`、`data/private/`，避免把密钥、数据库、上传文件或私有政策数据覆盖到 Git/构建包同步范围。
+- 切换时会同步更新 `/var/www/yuan-academy-live` 软链接，nginx 静态资源和上传文件应读取该 live 目录，避免 HTML 与 CSS/JS 构建版本不一致。
+- 默认复用当前线上 `node_modules`，不在低配生产机现场执行 `npm install`；如确实有依赖变化，再显式设置 `INSTALL_DEPS=1`。
 
 常用命令：
 
@@ -189,8 +200,9 @@ bash scripts/deploy-blue-green.sh --activate
 
 1. 创建 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green` 两套运行目录。
 2. 两套目录共用同一个 `.env.local`、`prisma/dev.db` 和 `data/private/`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
-3. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
-4. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理。
+3. 创建 `/var/www/yuan-academy-live` 软链接指向当前颜色目录；nginx 的上传目录和 `/_next/static` 静态资源都读取 live 目录。
+4. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
+5. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理。
 
 回滚方式：
 
@@ -207,9 +219,9 @@ bash scripts/deploy-blue-green.sh --activate
 | **RAM** | 1.6 GB |
 | **Swap** | 2 GB（已激活） |
 | **磁盘** | 40 GB（约 11GB 已用） |
-| **PM2 模式** | fork，单实例，512MB 内存上限 |
+| **PM2 模式** | fork，蓝绿双实例，单实例 512MB 内存上限 |
 | **Node.js** | 运行要求 >= v20.16.0；生产实际版本未在本次本地开发中核验，部署前执行 `node -v` |
-| **端口** | 3001（Next.js）← nginx 代理 443（HTTPS） |
+| **端口** | blue:3001，green:3003，nginx 代理 443（HTTPS）到当前颜色；官网占用 3002 |
 
 ### 确认服务器运行状态
 
@@ -218,7 +230,9 @@ bash scripts/deploy-blue-green.sh --activate
 ssh root@120.79.162.27 "
   pm2 list
   free -m | grep -E 'Mem|Swap'
-  curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/login
+  curl -s -o /dev/null -w 'blue:%{http_code}\n' http://localhost:3001/login
+  curl -s -o /dev/null -w 'green:%{http_code}\n' http://localhost:3003/login
+  cat /var/www/yuan-academy-current
   df -h /
 "
 ```

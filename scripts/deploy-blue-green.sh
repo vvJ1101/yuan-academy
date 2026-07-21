@@ -6,9 +6,11 @@ APP_NAME="${APP_NAME:-yuan-academy}"
 DOMAIN="${DOMAIN:-https://academy.yuanshowroom.cn}"
 BASE_DIR="${BASE_DIR:-/var/www}"
 STATE_FILE="${STATE_FILE:-/var/www/yuan-academy-current}"
+LIVE_DIR="${LIVE_DIR:-/var/www/yuan-academy-live}"
 NGINX_UPSTREAM_FILE="${NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/yuan-academy-upstream.conf}"
 BLUE_PORT="${BLUE_PORT:-3001}"
-GREEN_PORT="${GREEN_PORT:-3002}"
+GREEN_PORT="${GREEN_PORT:-3003}"
+INSTALL_DEPS="${INSTALL_DEPS:-0}"
 MODE="dry-run"
 
 usage() {
@@ -27,9 +29,11 @@ Environment overrides:
   SERVER=root@120.79.162.27
   BASE_DIR=/var/www
   STATE_FILE=/var/www/yuan-academy-current
+  LIVE_DIR=/var/www/yuan-academy-live
   NGINX_UPSTREAM_FILE=/etc/nginx/conf.d/yuan-academy-upstream.conf
   BLUE_PORT=3001
-  GREEN_PORT=3002
+  GREEN_PORT=3003
+  INSTALL_DEPS=0
 USAGE
 }
 
@@ -76,6 +80,7 @@ if [ "$MODE" = "dry-run" ]; then
     echo 'Server node:' \$(node -v)
     echo 'Current state file:' '$STATE_FILE'
     echo 'Current color:' '$CURRENT_COLOR'
+    echo 'Live dir link:' \$(readlink -f '$LIVE_DIR' 2>/dev/null || echo missing)
     echo 'Target dir exists:' \$(test -d '$TARGET_DIR' && echo yes || echo no)
     echo 'Nginx upstream file exists:' \$(test -f '$NGINX_UPSTREAM_FILE' && echo yes || echo no)
     pm2 status '$APP_NAME' '$APP_NAME-blue' '$APP_NAME-green' 2>/dev/null || true
@@ -128,8 +133,18 @@ ssh "$SERVER" "
     mkdir -p data
     ln -sfn '$CURRENT_DIR/data/private' data/private
   fi
+  if [ -d '$CURRENT_DIR/public/uploads' ]; then
+    mkdir -p public
+    ln -sfn '$CURRENT_DIR/public/uploads' public/uploads
+  fi
 
-  npm install --omit=dev
+  if [ '$INSTALL_DEPS' = '1' ]; then
+    npm install --omit=dev
+  elif [ -d '$CURRENT_DIR/node_modules' ]; then
+    ln -sfn '$CURRENT_DIR/node_modules' node_modules
+  else
+    npm install --omit=dev
+  fi
   npx prisma generate
 
   rm -rf .next.new .next.previous
@@ -190,6 +205,7 @@ ssh "$SERVER" "
     echo 'Run the one-time blue/green nginx initialization first, then retry --activate.'
     exit 1
   fi
+  ln -sfn '$TARGET_DIR' '$LIVE_DIR'
   cp '$NGINX_UPSTREAM_FILE' '$NGINX_UPSTREAM_FILE.before-$BUILD_ID' 2>/dev/null || true
   cat > '$NGINX_UPSTREAM_FILE' <<EOF
 upstream yuan_academy_upstream {
