@@ -6,6 +6,7 @@ import {
   getPermissionModuleKey,
   getRiskLevel,
   buildPermissionSummary,
+  buildIndentedPermissionTree,
   PERMISSION_TEMPLATES,
 } from './permission-groups'
 import type { MenuNode } from '@/types/role-management'
@@ -70,4 +71,16 @@ test('buildPermissionSummary explains checked permissions in business language',
   const summary = buildPermissionSummary(tree, ['brand-entry', 'contact-page', 'market-view'])
   assert.ok(summary.includes('可进入品牌资料'))
   assert.ok(summary.includes('可查看品牌对接信息中的市场字段'))
+})
+
+test('buildIndentedPermissionTree groups permissions by module with module headers as first level', () => {
+  const result = buildIndentedPermissionTree(tree)
+  const brandModule = result.find(node => node.id === 'module-brand')
+  const knowledgeModule = result.find(node => node.id === 'module-knowledge')
+
+  assert.equal(result.length, 2)
+  assert.equal(brandModule?.name, '品牌资料')
+  assert.equal(brandModule?.children?.[0].id, 'brand-root')
+  assert.equal(knowledgeModule?.name, '知识中心')
+  assert.equal(knowledgeModule?.children?.[0].id, 'knowledge-root')
 })

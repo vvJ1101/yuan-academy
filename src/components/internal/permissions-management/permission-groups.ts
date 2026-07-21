@@ -100,6 +100,24 @@ export function filterPermissionTree(nodes: MenuNode[], query: string): MenuNode
   return nodes.map(visit).filter((node): node is MenuNode => Boolean(node))
 }
 
+export function buildIndentedPermissionTree(nodes: MenuNode[]): MenuNode[] {
+  return PERMISSION_MODULES.flatMap(module => {
+    const children = nodes.filter(node => getPermissionModuleKey(node) === module.key)
+    if (children.length === 0) return []
+    return [{
+      id: `module-${module.key}`,
+      parentId: null,
+      name: module.label,
+      type: 1,
+      permission: null,
+      icon: null,
+      sort: PERMISSION_MODULES.findIndex(item => item.key === module.key) + 1,
+      path: null,
+      children,
+    }]
+  })
+}
+
 export function collectPermissionIdsByKeys(nodes: MenuNode[], keys: readonly string[]): string[] {
   const wanted = new Set(keys)
   return flatten(nodes)

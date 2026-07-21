@@ -17,14 +17,12 @@ import { deptApi } from '@/api/dept'
 import type { RoleVO, MenuNode, UserVO, DataScopeType } from '@/types/role-management'
 import { DATA_SCOPE_LABELS } from '@/types/role-management'
 import {
-  PERMISSION_MODULES,
   PERMISSION_TEMPLATES,
+  buildIndentedPermissionTree,
   buildPermissionSummary,
   collectPermissionIdsByKeys,
   filterPermissionTree,
-  getPermissionModuleKey,
   getRiskLevel,
-  type PermissionModuleKey,
 } from './permission-groups'
 
 // ── Convert menu tree to Ant Design Tree nodes ──
@@ -33,7 +31,7 @@ function toTreeNodes(menus: MenuNode[]): DataNode[] {
   return menus.map(m => ({
     key: m.id,
     title: (
-      <span>
+      <span style={{ fontWeight: m.id.startsWith('module-') ? 700 : 400 }}>
         {m.name}
         {getRiskLevel(m.permission) !== 'none' && (
           <Tag color={riskColor[getRiskLevel(m.permission)]}
@@ -51,6 +49,7 @@ function toTreeNodes(menus: MenuNode[]): DataNode[] {
       </span>
     ),
     children: m.children ? toTreeNodes(m.children) : undefined,
+    disableCheckbox: m.id.startsWith('module-'),
     selectable: false,
   }))
 }
@@ -59,7 +58,7 @@ export default function RoleManagementPage() {
 function getAllKeys(nodes: DataNode[]): string[] {
   const keys: string[] = []
   for (const n of nodes) {
-    keys.push(n.key as string)
+    if (!String(n.key).startsWith('module-')) keys.push(n.key as string)
     if (n.children) keys.push(...getAllKeys(n.children))
   }
   return keys
@@ -86,7 +85,6 @@ function getAllKeys(nodes: DataNode[]): string[] {
   const [permChecked, setPermChecked] = useState<string[]>([])
   const [permSaving, setPermSaving] = useState(false)
   const [permExpandAll, setPermExpandAll] = useState(true)
-  const [activePermissionModule, setActivePermissionModule] = useState<PermissionModuleKey>('brand')
   const [permissionSearch, setPermissionSearch] = useState('')
 
   // Data scope modal
@@ -139,9 +137,8 @@ function getAllKeys(nodes: DataNode[]): string[] {
   }, [allUsers])
 
   const visiblePermissionMenus = useMemo(() => {
-    const moduleNodes = permMenuTree.filter(node => getPermissionModuleKey(node) === activePermissionModule)
-    return filterPermissionTree(moduleNodes.length > 0 ? moduleNodes : permMenuTree, permissionSearch)
-  }, [activePermissionModule, permMenuTree, permissionSearch])
+    return filterPermissionTree(buildIndentedPermissionTree(permMenuTree), permissionSearch)
+  }, [permMenuTree, permissionSearch])
 
   const visiblePermissionTree = useMemo(() => toTreeNodes(visiblePermissionMenus), [visiblePermissionMenus])
 
@@ -252,7 +249,6 @@ function getAllKeys(nodes: DataNode[]): string[] {
     setUsersRoleId(r.id)
     setUsersRoleName(r.name)
     setConfigTab('permissions')
-    setActivePermissionModule('brand')
     setPermissionSearch('')
     setConfigOpen(true)
     setPermExpandAll(true)
@@ -471,38 +467,15 @@ function getAllKeys(nodes: DataNode[]): string[] {
                   type="warning"
                   showIcon
                   style={{ marginBottom: 12 }}
-                  message="按业务模块配置权限"
-                  description="左侧先选择模块，中间勾页面和按钮，右侧会用人话解释当前角色最终能做什么。建议先勾页面入口，再勾对应按钮。"
+                  message="按缩进层级配置权限"
+                  description="第一层是模块，第二层是页面，第三层是按钮或数据动作。建议先勾页面入口，再勾对应按钮。右侧会用人话解释当前角色最终能做什么。"
                 />
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'minmax(150px, 180px) minmax(320px, 1fr) minmax(220px, 260px)',
+                  gridTemplateColumns: 'minmax(420px, 1fr) minmax(220px, 260px)',
                   gap: 12,
                   alignItems: 'start',
                 }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {PERMISSION_MODULES.map(module => (
-                      <button
-                        key={module.key}
-                        type="button"
-                        onClick={() => setActivePermissionModule(module.key)}
-                        style={{
-                          minHeight: 44,
-                          textAlign: 'left',
-                          borderRadius: 10,
-                          border: activePermissionModule === module.key ? '1px solid #2563eb' : '1px solid #e5e7eb',
-                          background: activePermissionModule === module.key ? '#eff6ff' : '#fff',
-                          color: activePermissionModule === module.key ? '#1d4ed8' : '#374151',
-                          padding: '9px 10px',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{module.label}</div>
-                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{module.description}</div>
-                      </button>
-                    ))}
-                  </div>
-
                   <div style={{ border: '1px solid #f0f0f0', borderRadius: 12, padding: 12, background: '#fff' }}>
                     <Input.Search
                       placeholder="搜索权限，例如：品牌对接、市场字段、删除"
@@ -540,15 +513,15 @@ function getAllKeys(nodes: DataNode[]): string[] {
                           setPermChecked(everyVisibleChecked
                             ? permChecked.filter(key => !visibleKeys.includes(key))
                             : Array.from(new Set([...permChecked, ...visibleKeys])))
-                        }}>选择当前模块</Button>
+                        }}>{permissionSearch ? '选择搜索结果' : '选择当前树'}</Button>
                       </Space>
                       <span style={{ fontSize: 12, color: '#666' }}>已选择 {permChecked.length} 个权限节点</span>
                     </div>
-                    <Tree key={`${activePermissionModule}-${permissionSearch}-${permExpandAll ? 'e' : 'c'}`} checkable checkStrictly defaultExpandAll={permExpandAll}
+                    <Tree key={`${permissionSearch}-${permExpandAll ? 'e' : 'c'}`} checkable checkStrictly defaultExpandAll={permExpandAll}
                       checkedKeys={permChecked}
                       onCheck={(keys) => {
                         const rawKeys = Array.isArray(keys) ? keys : keys.checked
-                        setPermChecked(rawKeys.map(String))
+                        setPermChecked(rawKeys.map(String).filter(key => !key.startsWith('module-')))
                       }}
                       treeData={visiblePermissionTree}
                       style={{ maxHeight: 440, overflow: 'auto' }}
