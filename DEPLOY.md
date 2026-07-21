@@ -158,6 +158,45 @@ ssh root@120.79.162.27 "
 
 在蓝绿部署脚本完成前，生产部署仍按本文档现有脚本执行；如果网站已经不可用，优先恢复服务，再做蓝绿改造。
 
+### 蓝绿部署脚本（试运行/预部署）
+
+当前已提供蓝绿部署脚手架：`scripts/deploy-blue-green.sh`。它的目标是先把新版本部署到备用颜色目录并单独健康检查，确认可用后再切换 nginx 流量。
+
+安全约束：
+
+- 默认 `--dry-run` 只读取状态，不修改服务器。
+- `--deploy-only` 只部署并启动备用端口，不切换线上流量。
+- `--activate` 会切换 nginx，属于生产流量变更，执行前必须得到明确确认。
+- `--activate` 前要求 nginx 已经使用 `yuan_academy_upstream` upstream；如果服务器还没做一次性 nginx 初始化，脚本会拒绝切换。
+- 脚本会排除 `.env*`、`prisma/dev.db*`、`public/uploads/`、`data/private/`，避免把密钥、数据库、上传文件或私有政策数据覆盖到 Git/构建包同步范围。
+
+常用命令：
+
+```bash
+cd /Users/vv/Documents/YUAN开发/yuan-academy
+
+# 1. 查看蓝绿状态，不修改生产
+bash scripts/deploy-blue-green.sh --dry-run
+
+# 2. 构建并部署到备用颜色，只验证备用端口，不切流量
+bash scripts/deploy-blue-green.sh --deploy-only
+
+# 3. 健康检查通过后，切换 nginx 到备用颜色（必须先确认）
+bash scripts/deploy-blue-green.sh --activate
+```
+
+一次性服务器初始化要求：
+
+1. 创建 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green` 两套运行目录。
+2. 两套目录共用同一个 `.env.local`、`prisma/dev.db` 和 `data/private/`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
+3. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
+4. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理。
+
+回滚方式：
+
+- 如果新颜色已部署但未 `--activate`，不需要回滚，线上仍在旧颜色。
+- 如果已经 `--activate` 后发现异常，把 `/etc/nginx/conf.d/yuan-academy-upstream.conf` 切回旧端口并执行 `nginx -t && nginx -s reload` 即可；旧 PM2 进程会保留运行，避免重新构建。
+
 ## 服务器配置
 
 ### 当前状态
