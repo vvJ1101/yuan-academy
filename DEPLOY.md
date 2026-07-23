@@ -25,30 +25,49 @@ NODE_ENV=production
 
 ## 部署工作流
 
+### 当前强制规范（2026-07-23）
+
+Academy 已切换为轻量 standalone 部署。生产服务器内存有限，部署必须遵守：
+
+1. **构建在本地或 CI 完成**，服务器只接收可运行包。
+2. **禁止在生产服务器执行 `npm install` / `npm run build`**；确需执行时，必须先说明风险并得到确认。
+3. PM2 运行 `server.js`，不再依赖 `node_modules/.bin/next`。
+4. 蓝绿部署只在部署窗口短暂双实例；`--activate` 后默认停止旧颜色实例。
+5. 订货政策等私有数据固定保存在 `/var/www/yuan-academy-shared/data/private`，颜色目录只建立软链接。
+6. `.env.local`、`prisma/dev.db`、`public/uploads/`、共享私有数据目录不得被 rsync、tar 解压或清理命令覆盖。
+7. 每次部署后必须验证：公网 `/login=200`，本机当前端口 `/login=200`，匿名 `/api/policies=401`，订货政策 JSON 非空。
+
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
 - SSH 登录信息已通过安全渠道配置
 - 本地 Node.js >= 20.16.0；部署前运行 `node -v` 确认版本
 - 服务器部署前同样运行 `node -v`，确认 Node.js >= 20.16.0
 
-### 一键部署脚本
+### 推荐部署脚本
 
 ```bash
 cd /Users/vv/Documents/YUAN开发/yuan-academy
 # 必须先确认本地 Node.js >= 20.16.0
 node -v
-bash scripts/deploy-local.sh
+bash scripts/deploy-blue-green.sh --dry-run
+bash scripts/deploy-blue-green.sh --deploy-only
+bash scripts/deploy-blue-green.sh --activate
 ```
 
 脚本自动执行：
-1. 本地 `npm run build`（保留 `.next/cache` 加速增量编译）
-2. `xattr -cr` 清除 macOS 扩展属性
-3. tar 打包构建产物（排除 `*.map` 文件）
-4. scp 传输到服务器
-5. 服务器备份旧 `.next` → 解压新版本 → 校验 BUILD_ID
-6. PM2 重启 + 健康检查（失败自动回滚）
+1. 本地 `npm run build` 生成 standalone 产物。
+2. 打包 `.next/standalone`、`.next/static` 和 `public/`（排除上传文件）。
+3. 上传到备用颜色目录。
+4. 服务器只解压可运行包，不安装依赖、不构建。
+5. PM2 用 `server.js` 启动备用颜色。
+6. 健康检查通过后切换 nginx upstream。
+7. 默认停止旧颜色实例以释放内存。
 
-### 手动分步部署
+`scripts/deploy-local.sh` 是旧 `.next` 部署脚本，不再作为生产首选；除非明确回滚旧部署模式，否则不要使用。
+
+### 旧手动分步部署（仅作历史参考）
+
+以下流程会把完整源码和 `.next` 产物同步到服务器，且容易诱导在生产机补依赖。当前生产已改为 standalone 方案，正常上线不要使用本节。
 
 ```bash
 # 1. 本地构建
@@ -277,17 +296,23 @@ cp prisma/dev.db /var/backups/yuan-academy-$(date +%Y%m%d).db
 
 ## 订货政策私有数据部署
 
-订货政策运行数据不提交到 Git，也不包含在 `.next` 构建包中。首次部署、迁移服务器或重建 `/var/www/yuan-academy` 时，必须单独配置以下目录：
+订货政策运行数据不提交到 Git，也不包含在 `.next` 或 standalone 构建包中。首次部署、迁移服务器或重建 `/var/www/yuan-academy` 时，必须单独配置共享私有目录：
 
 ```text
-/var/www/yuan-academy/data/private/policies/
+/var/www/yuan-academy-shared/data/private/policies/
 ├── policies.json
 ├── policies.updated.json
 ├── policies.backup.json
 └── 订货政策-上传模板.xlsx
 ```
 
-目录权限设为 `750`，文件权限设为 `640`。传输应先进入服务器临时目录，校验 JSON 后再通过 `install` 原子写入目标位置。不得把这些文件复制到 `public/`、`.next/static/` 或 Nginx 静态目录。
+运行目录中只保留软链接：
+
+```text
+/var/www/yuan-academy/data/private -> /var/www/yuan-academy-shared/data/private
+```
+
+目录权限设为 `750`，文件权限设为 `640`。传输应先进入服务器临时目录，校验 JSON 后再通过 `install` 原子写入目标位置。不得把这些文件复制到 `public/`、`.next/static/`、standalone 包或 Nginx 静态目录。
 
 部署后验证：
 
@@ -295,7 +320,8 @@ cp prisma/dev.db /var/backups/yuan-academy-$(date +%Y%m%d).db
 ssh root@120.79.162.27 '
   set -e
   cd /var/www/yuan-academy
-  test "$(stat -c %a data/private/policies)" = 750
+  test "$(readlink -f data/private)" = "/var/www/yuan-academy-shared/data/private"
+  test "$(stat -c %a /var/www/yuan-academy-shared/data/private/policies)" = 750
   node -e "const p=require(\"./data/private/policies/policies.json\"); const rows=Array.isArray(p)?p:p.policies; if(!Array.isArray(rows)||rows.length===0) process.exit(1); console.log(rows.length)"
   test ! -e public/data/policies.json
   test ! -e public/showroom/data/policies.json
@@ -303,7 +329,37 @@ ssh root@120.79.162.27 '
 '
 ```
 
-登录态还需在浏览器访问 `/internal/policy`，确认品牌数量和更新时间正常显示。自动部署不得删除 `data/private/`；使用 `rsync --delete` 时必须把该目录加入排除列表。
+登录态还需在浏览器访问 `/internal/policy`，确认品牌数量和更新时间正常显示。自动部署不得删除 `/var/www/yuan-academy-shared/data/private/`；使用 `rsync --delete`、`find ... -exec rm -rf` 或解压覆盖时必须把该目录排除在外。
+
+### 2026-07-23 502 与订货数据恢复记录
+
+故障现象：
+
+- Academy 出现 502 / 无法访问。
+- 服务器重启后内存仍高，SSH 一度在握手阶段超时。
+- 恢复访问后，订货政策页面显示数据为空。
+
+根因：
+
+- 旧蓝绿脚本在服务器侧依赖 `node_modules/.bin/next`，目录被清理或依赖入口缺失后 PM2 无法启动，导致 nginx 代理到不可用后端。
+- 2G 服务器上现场执行 `npm install` 会造成高 IO/高内存压力，甚至拖慢 SSH 和公网响应。
+- 切换 standalone 运行目录后，私有政策数据没有固定到共享目录，导致当前运行目录缺少 `data/private/policies`。
+
+处理：
+
+- Next.js 开启 `output: 'standalone'`。
+- 部署脚本改为本地构建并上传 standalone 可运行包。
+- PM2 改为运行 `server.js`。
+- `--activate` 后默认停止旧颜色实例，降低常驻内存。
+- 订货政策私有数据恢复到 `/var/www/yuan-academy-shared/data/private/policies`，运行目录只建立软链接。
+
+验证：
+
+- `https://academy.yuanshowroom.cn/login` 返回 `200`。
+- 当前颜色本机 `/login` 返回 `200`。
+- 匿名 `/api/policies` 返回 `401`。
+- `policies.json` 可读取 15 条政策。
+- 服务器 swap 使用为 `0B`，可用内存恢复到约 890Mi。
 
 ### 政策结构化解析示例
 

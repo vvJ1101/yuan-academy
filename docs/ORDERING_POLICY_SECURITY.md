@@ -4,7 +4,8 @@
 
 ## 存储边界
 
-- 运行数据保存在 `data/private/policies/`，该目录中的运行时 JSON、元数据和备份文件不提交到 Git。
+- 生产运行数据保存在 `/var/www/yuan-academy-shared/data/private/policies/`，运行目录 `data/private` 只作为软链接指向共享目录。
+- 本地开发仍可使用仓库内 `data/private/policies/`，但该目录中的运行时 JSON、元数据和备份文件不提交到 Git。
 - Excel 上传模板保存在私有数据目录，由受保护接口提供下载。
 - `public/data/`、`public/showroom/data/` 和 `src/data/` 不得保存订货政策副本。
 
@@ -24,17 +25,18 @@ npm test
 npm run build
 ```
 
-部署后应确认旧公开地址不返回政策内容，未登录访问政策接口返回 `401`，并检查 CDN 或反向代理缓存中不存在历史公开文件。`data/private/policies/` 不包含在 Git 或 `.next` 构建产物中，新服务器必须独立配置该目录。
+部署后应确认旧公开地址不返回政策内容，未登录访问政策接口返回 `401`，并检查 CDN 或反向代理缓存中不存在历史公开文件。`data/private/policies/` 不包含在 Git、`.next` 或 standalone 构建产物中，新服务器必须独立配置共享私有目录。
 
 生产环境标准：
 
-- 目录：`/var/www/yuan-academy/data/private/policies/`
+- 共享目录：`/var/www/yuan-academy-shared/data/private/policies/`
+- 运行目录软链接：`/var/www/yuan-academy/data/private -> /var/www/yuan-academy-shared/data/private`
 - 目录权限：`750`
 - 文件权限：`640`
 - 必需文件：`policies.json`、`policies.updated.json`、`policies.backup.json`、`订货政策-上传模板.xlsx`
-- 部署脚本不得删除或覆盖整个 `data/private/` 目录。
+- 部署脚本不得删除或覆盖 `/var/www/yuan-academy-shared/data/private/`。
 
-当页面提示“订货政策数据不存在”时，先检查生产服务器的私有目录；不得将数据复制回 `public/` 作为临时修复。
+当页面提示“订货政策数据不存在”时，先检查生产服务器共享私有目录和运行目录软链接；不得将数据复制回 `public/` 作为临时修复。
 
 ## 迁移记录
 
@@ -60,6 +62,23 @@ npm run build
 - 生产私有目录和文件权限符合上述标准。
 
 此次故障属于运行数据配置缺失，不是官网或 Academy 页面代码回归。后续首次部署和服务器迁移必须把私有数据配置列为独立上线步骤。
+
+### 2026-07-23 standalone 部署后数据恢复
+
+线上切换为 standalone 轻量部署后，`/internal/policy` 再次出现订货政策数据为空。排查确认数据没有真正丢失，备份目录 `/var/backups/yuan-academy/blue-green-init-20260721-125143/code/data/private/policies/` 中仍有完整政策文件。
+
+本次处理：
+
+- 将备份中的私有数据恢复到 `/var/www/yuan-academy-shared/data/private/`。
+- 将当前运行目录 `/var/www/yuan-academy/data/private` 改为指向共享目录的软链接。
+- 更新部署脚本，后续颜色目录只挂载共享私有目录，不再把私有数据放进 standalone 包。
+- 更新部署文档，明确共享私有目录为生产标准路径。
+
+验证结果：
+
+- `policies.json` 可读取 15 条政策。
+- 公网 `/login` 返回 `200`。
+- 未登录 `GET /api/policies` 返回 `401`。
 
 详细设计与实施步骤见：
 
