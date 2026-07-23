@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/roles — list with pagination + search
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.admin.roles', '无权查看角色管理')
+  if (!guard.ok) return guard.response
   const { searchParams } = new URL(req.url)
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'))
   const size = Math.min(100, Math.max(1, parseInt(searchParams.get('size') || '20')))
@@ -37,10 +37,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/roles — create role
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'role.create', '无权新建角色')
+  if (!guard.ok) return guard.response
   const body = await req.json()
   if (!body.name || !body.code) {
     return NextResponse.json({ code: 400, message: '名称和标识不能为空' }, { status: 400 })

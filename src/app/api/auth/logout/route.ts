@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 
 
 export async function GET() {
-  cookies().set('session', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 })
+  const cookieStore = await cookies()
+  cookieStore.set('session', '', { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', path: '/', maxAge: 0 })
   redirect('/login')
 }

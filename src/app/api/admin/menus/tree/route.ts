@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id) return NextResponse.json({ code: 401, message: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.admin.permissions', '无权查看权限菜单树')
+  if (!guard.ok) return guard.response
 
   const all = await prisma.sysMenu.findMany({
     orderBy: [{ sort: 'asc' }, { name: 'asc' }],

@@ -5,6 +5,7 @@ import { canEditDocument } from '@/lib/permissions/documents'
 import { sanitizeMarkdown } from '@/lib/sanitize'
 import { PHASE1_SYSTEM_PROMPT } from '@/lib/prompts/phase1-extract'
 import { validateOutput } from '@/lib/validator'
+import { requirePermission } from '@/lib/permissions/guards'
 
 function getClient() {
   const proxyUrl = process.env.DEEPSEEK_PROXY_URL
@@ -164,21 +165,22 @@ function sanitizeDraft(draft: string): string {
 }
 
 // ── POST handler: Two-phase pipeline ──
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Auth
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.role === 'staff') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'document.aiAnalyze', '你没有 AI 解析文档的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   // Load document
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: { id: true, title: true, fullContent: true, ownerDeptId: true, category: true, ownerDept: { select: { name: true } } },
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   // dept_admin: only own department's docs
-  if (!canEditDocument(session, doc.ownerDeptId) && session.role !== 'super_admin') {
+  if (!canEditDocument(activeSession, doc.ownerDeptId) && activeSession.role !== 'super_admin') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

@@ -2,13 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { logEdit } from '@/lib/audit'
+import { requirePermission } from '@/lib/permissions/guards'
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'learningPath.edit', '你没有编辑学习路径的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
-  const existing = await prisma.learningPath.findUnique({ where: { id: params.id } })
+  const routeParams = await params
+  const existing = await prisma.learningPath.findUnique({ where: { id: routeParams.id } })
   if (!existing) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
@@ -18,7 +21,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   // Full replacement strategy
   const updated = await prisma.learningPath.update({
-    where: { id: params.id },
+    where: { id: routeParams.id },
     data: {
       title,
       deptId: deptId || existing.deptId,
@@ -27,7 +30,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   })
 
   // Audit log
-  logEdit(session.id, params.id).catch((err: any) => console.error("[AuditLogError]", err))
+  logEdit(activeSession.id, routeParams.id).catch((err: any) => console.error("[AuditLogError]", err))
 
   // Resolve docs for response
   let docIdList: string[] = []
@@ -45,14 +48,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ success: true, data: { ...updated, docs: ordered, docCount: ordered.length } })
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Forbidden: super_admin only' }, { status: 403 })
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'learningPath.delete', '你没有删除学习路径的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
-  const existing = await prisma.learningPath.findUnique({ where: { id: params.id } })
+  const routeParams = await params
+  const existing = await prisma.learningPath.findUnique({ where: { id: routeParams.id } })
   if (!existing) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
-  await prisma.learningPath.delete({ where: { id: params.id } })
+  await prisma.learningPath.delete({ where: { id: routeParams.id } })
+  prisma.auditLog.create({ data: { userId: activeSession.id, action: 'learningPath:delete' } }).catch((err: any) => console.error('[AuditLogError]', err))
   return NextResponse.json({ success: true })
 }

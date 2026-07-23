@@ -2,14 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'ai.risk', '你没有查看 AI 风险分析的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
-  const where = buildDocumentWhere(session)
+  const where = await buildDocumentWhere(activeSession)
 
   // Risk detection patterns:
   // 1. Documents with riskLevel = 'high'

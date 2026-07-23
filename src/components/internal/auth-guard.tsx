@@ -35,8 +35,8 @@ function parseSession(raw: string): any {
   try { return JSON.parse(raw) } catch { return null }
 }
 
-export function AuthGuard({ children, requireRole }: Props) {
-  const cookieStore = cookies()
+export async function AuthGuard({ children, requireRole }: Props) {
+  const cookieStore = await cookies()
   const sessionCookie = cookieStore.get('session')
 
   // No session → redirect to login

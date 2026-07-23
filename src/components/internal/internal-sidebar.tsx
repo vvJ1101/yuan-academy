@@ -1,37 +1,31 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { Folder, Home, Clock, Star, Upload, ChevronDown, ChevronRight, Layout, Wrench, Loader2, ScrollText } from 'lucide-react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useState, useRef } from 'react'
+import { Folder, ChevronDown, ChevronRight, Loader2, ScrollText } from 'lucide-react'
 import { PermissionEditor } from '@/components/internal/PermissionEditor'
 import { TreeFolder } from '@/components/internal/TreeFolder'
+import { BRAND_LINKS, QUICK_LINKS, isSectionExpanded } from '@/components/internal/sidebar-links'
 
 interface FolderItem { id: string; name: string; slug: string; parentId: string | null; companyId: string | null; _count: { documents: number; children: number } }
 interface Company { id: string; name: string; slug: string }
 
-const QUICK_LINKS = [
-  { href: '/internal/dashboard', label: '首页', Icon: Home, perm: 'menu.dashboard', permKey: 'menu.dashboard' },
-  { href: '/internal/recent', label: '最近访问', Icon: Clock, perm: 'menu.recent', permKey: 'menu.recent' },
-  { href: '/internal/favorites', label: '我的收藏', Icon: Star, perm: 'menu.favorites', permKey: 'menu.favorites' },
-  { href: '/internal/documents', label: '我的上传', Icon: Upload, perm: 'menu.documents', permKey: 'menu.documents' },
-  { href: '/internal/policy', label: '订货政策', Icon: ScrollText, permKey: 'menu.policy' },
-  { href: '/internal/policy-upload', label: '政策上传', Icon: Upload, permKey: 'menu.policyUpload' },
-  { href: '/internal/admin', label: '管理中心', Icon: Wrench, perm: 'menu.admin', permKey: 'admin' },
-]
-
 export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname() || ''
+  const searchParams = useSearchParams()
   const router = useRouter()
   const [folders, setFolders] = useState<FolderItem[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [activeId, setActiveId] = useState('')
   const [ctxMenu, setCtxMenu] = useState<any>(null)
   const [permTarget, setPermTarget] = useState<any>(null)
   const [depts, setDepts] = useState<{id:string;name:string;slug:string;companyId:string}[]>([])
   const [allUsers, setAllUsers] = useState<{id:string;name:string;email:string;role:string;departmentId:string}[]>([])
   const [storage, setStorage] = useState<{ usedGB: number; totalGB: number; percent: number }>({ usedGB: 0, totalGB: 100, percent: 0 })
+  const ctxMenuRef = useRef<HTMLDivElement>(null)
 
   // ── Inline create state ──
   const [inlineCreate, setInlineCreate] = useState<{ parentId: string; name: string } | null>(null)
@@ -47,13 +41,14 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
   const [folderPerms, setFolderPerms] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r=>r.json()).then(u=>{ if(u?.permissions) setUserPerms(u.permissions) }).catch((err: any) => console.warn("[SilentError]", err))
+    fetch('/api/auth/me').then(r=>r.json()).then(u=>{
+      if(u?.permissions) setUserPerms(u.permissions)
+    }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/user/permissions').then(r=>r.json()).then(d=>{ if(d?.code===0) setPermList(d.data.permissions||[]) }).catch((err: any) => console.warn("[SilentError]", err))
 
     fetch('/api/folders').then(r => r.json()).then(d => {
       if (d?.folders) {
         setFolders(d.folders)
-        // 提取每个文件夹的用户权限等级
         const perms: Record<string, string> = {}
         for (const f of d.folders) {
           if (f.userPermission) perms[f.id] = f.userPermission
@@ -65,7 +60,35 @@ export function InternalSidebar({ onClose }: { onClose?: () => void }) {
     fetch('/api/companies').then(r => r.json()).then(d => { if (Array.isArray(d)) setCompanies(d) }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/departments').then(r => r.json()).then(d => { if (Array.isArray(d)) setDepts(d) }).catch((err: any) => console.warn("[SilentError]", err))
     fetch('/api/users').then(r => r.json()).then(d => { if (Array.isArray(d)) setAllUsers(d) }).catch((err: any) => console.warn("[SilentError]", err))
+
+    const handleRefresh = () => refreshFolders()
+    window.addEventListener('folderRefresh', handleRefresh)
+    return () => window.removeEventListener('folderRefresh', handleRefresh)
   }, [])
+
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    // 先设置初始位置为鼠标位置
+    setMenuPos({ x: ctxMenu.x, y: ctxMenu.y })
+    // 在 DOM 渲染后测量菜单尺寸并调整边界
+    const adjust = () => {
+      if (!ctxMenuRef.current) return
+      const rect = ctxMenuRef.current.getBoundingClientRect()
+      if (rect.width === 0 || rect.height === 0) {
+        requestAnimationFrame(adjust)
+        return
+      }
+      const maxX = window.innerWidth - rect.width - 8
+      const maxY = window.innerHeight - rect.height - 8
+      setMenuPos({
+        x: Math.max(8, Math.min(ctxMenu.x, maxX)),
+        y: Math.max(8, Math.min(ctxMenu.y, maxY)),
+      })
+    }
+    requestAnimationFrame(adjust)
+  }, [ctxMenu])
 
   async function refreshFolders() {
     const r = await fetch('/api/folders').then(r => r.json())
@@ -139,14 +162,22 @@ function PermBadge({ perm }: { perm: string }) {
     if (!inlineCreate || !inlineCreate.name.trim()) { setInlineCreate(null); return }
     setInlineSaving(true)
     try {
-      const siblings = folders.filter(f => f.parentId === inlineCreate.parentId)
+      // 虚拟节点转换为真实的 parentId
+      let actualParentId: string | null = inlineCreate.parentId
+      if (inlineCreate.parentId === 'yuan-root' || inlineCreate.parentId === 'yuan-group') {
+        actualParentId = null
+      } else if (inlineCreate.parentId.startsWith('company-')) {
+        // 公司节点下创建，parentId 为 null（创建知识空间）
+        actualParentId = null
+      }
+      const siblings = folders.filter(f => f.parentId === actualParentId)
       if (siblings.some(f => f.name.toLowerCase() === inlineCreate.name.trim().toLowerCase())) {
         alert('已存在同名文件夹'); setInlineSaving(false); return
       }
       const res = await fetch('/api/folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: inlineCreate.name.trim(), parentId: inlineCreate.parentId, inheritPermissions: true }),
+        body: JSON.stringify({ name: inlineCreate.name.trim(), parentId: actualParentId, inheritPermissions: true }),
       })
       if (res.ok) { await refreshFolders(); setInlineCreate(null) }
       else { const d = await res.json().catch(() => ({})); alert(d.error || '创建失败') }
@@ -190,14 +221,44 @@ function PermBadge({ perm }: { perm: string }) {
 
   // ═══ Other ctx actions ═══
   async function ctxDelete(f: any) {
+    if (!isReal(f.id)) { alert('该节点不可删除'); return }
     if (!confirm('删除「' + f.name + '」？')) return
     await fetch('/api/folders?id=' + f.id, { method: 'DELETE' })
     await refreshFolders(); setCtxMenu(null)
   }
-  function ctxPermissions(f: any) { setCtxMenu(null); setPermTarget({ id: f.id, name: f.name }) }
+  function ctxPermissions(f: any) {
+    if (!isReal(f.id)) { alert('该节点不支持权限管理'); return }
+    setCtxMenu(null); setPermTarget({ id: f.id, name: f.name })
+  }
   const isReal = (fid: string) => fid !== 'yuan-root' && fid !== 'yuan-group' && !fid.startsWith('company-')
 
   const navCls = (href: string) => isActive(href) ? 'flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] no-underline cursor-pointer bg-[#EBF5FF] text-[#2563EB] font-medium' : 'flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] no-underline cursor-pointer text-neutral-600 hover:bg-neutral-50'
+  const canSeePermission = (permKey?: string) => {
+    if (!permKey) return true
+    if (userPerms.includes('*') || permList.includes('*')) return true
+    if (userPerms.includes(permKey)) return true
+    if (permList.includes(permKey)) return true
+    if (permKey === 'admin' && permList.some(p => p.startsWith('admin:'))) return true
+    if (permKey === 'menu.brand' && userPerms.some(p => p.startsWith('menu.brand.'))) return true
+    if (permKey === 'menu.brand' && permList.some(p => p.startsWith('menu.brand.'))) return true
+    return false
+  }
+  const visibleBrandLinks = BRAND_LINKS.filter(link => canSeePermission(link.permKey) || canSeePermission('menu.brand'))
+  const brandOpen = pathname === '/internal/brand'
+    || pathname.startsWith('/internal/brand/')
+    || pathname === '/internal/policy'
+    || pathname.startsWith('/internal/policy/')
+  const brandExpanded = isSectionExpanded({
+    isActive: brandOpen,
+    expanded: expanded.has('brand-data'),
+    collapsed: collapsed.has('brand-data'),
+  })
+  const activeBrandType = pathname === '/internal/policy'
+    || pathname.startsWith('/internal/policy/')
+    ? 'ordering'
+    : pathname === '/internal/brand'
+      ? (searchParams.get('type') || 'contact')
+      : ''
 
   return (
     <aside className="w-[260px] h-full bg-white border-r border-neutral-200 flex flex-col overflow-hidden">
@@ -214,17 +275,53 @@ function PermBadge({ perm }: { perm: string }) {
       {/* Quick links */}
       <div className="shrink-0 py-2">
         <div className="px-3 mb-2">
-          {QUICK_LINKS.filter(l => {
-            if (!l.permKey) return true
-            if (userPerms.includes('*') || permList.includes('*')) return true
-            if (permList.includes(l.permKey)) return true
-            if (l.permKey === 'admin' && permList.some(p => p.startsWith('admin:'))) return true
-            return false
-          }).map(l => (
+          {QUICK_LINKS.filter(l => canSeePermission(l.permKey)).map(l => (
             <Link key={l.href} href={l.href} onClick={handleNav} className={navCls(l.href)}>
               <l.Icon size={16} strokeWidth={1.5} /><span>{l.label}</span>
             </Link>
           ))}
+          {visibleBrandLinks.length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  if (brandExpanded) {
+                    setCollapsed(prev => { const next = new Set(prev); next.add('brand-data'); return next })
+                    setExpanded(prev => { const next = new Set(prev); next.delete('brand-data'); return next })
+                  } else {
+                    setCollapsed(prev => { const next = new Set(prev); next.delete('brand-data'); return next })
+                    setExpanded(prev => { const next = new Set(prev); next.add('brand-data'); return next })
+                  }
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[0.82rem] text-neutral-700 ${brandOpen ? 'bg-neutral-50' : 'hover:bg-neutral-50'}`}
+              >
+                <ScrollText size={16} strokeWidth={1.5} />
+                <span className="font-medium">品牌资料</span>
+                <ChevronDown size={13} strokeWidth={2} className={`ml-auto transition-transform ${brandExpanded ? '' : '-rotate-90'}`} />
+              </button>
+              {brandExpanded && (
+                <div className="ml-6 mt-1 space-y-0.5 border-l border-neutral-100 pl-2">
+                  {visibleBrandLinks.map(link => {
+                    const active = activeBrandType === link.type
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        onClick={handleNav}
+                        className={`block rounded-lg px-3 py-1.5 text-[0.76rem] no-underline ${
+                          active
+                            ? 'bg-[#EBF5FF] text-[#2563EB] font-medium'
+                            : 'text-neutral-500 hover:bg-neutral-50 hover:text-neutral-800'
+                        }`}
+                      >
+                        {link.label}
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="mx-3 border-t border-neutral-100 mb-2" />
         <div className="px-3">
@@ -236,13 +333,27 @@ function PermBadge({ perm }: { perm: string }) {
 
       {/* Folder tree */}
       <div className="flex-1 overflow-y-auto px-3 pb-2">
-        <div className="flex items-center gap-1.5 px-1 py-1.5 text-[0.82rem] font-semibold text-[#111] cursor-pointer" onClick={() => toggle('yuan-root')}>
+        <div className="flex items-center gap-1.5 px-1 py-1.5 text-[0.82rem] font-semibold text-[#111] cursor-pointer" onClick={() => toggle('yuan-root')} onContextMenu={e => handleCtx(e, { id: 'yuan-root', name: 'YUAN SHOWROOM', isSpace: true })}>
           {expanded.has('yuan-root') ? <ChevronDown size={12} strokeWidth={2.5} /> : <ChevronRight size={12} strokeWidth={2.5} />}
           <Folder size={14} strokeWidth={1.5} className="text-[#2563EB]" /><span>YUAN SHOWROOM</span>
         </div>
 
         {expanded.has('yuan-root') && (
           <div className="ml-2 mt-0.5 border-l border-neutral-100">
+            {/* Inline create under yuan-root */}
+            {inlineCreate?.parentId === 'yuan-root' && (
+              <div className="py-0.5 px-2">
+                <div className="flex items-center gap-1.5 px-2 py-1">
+                  <Folder size={13} strokeWidth={1.5} className="text-[#60A5FA] opacity-60" />
+                  <input autoFocus value={inlineCreate.name}
+                    onChange={e => setInlineCreate({ parentId: 'yuan-root', name: e.target.value })}
+                    onKeyDown={handleInlineKeyDown} onBlur={saveInlineFolder} disabled={inlineSaving}
+                    className="flex-1 text-[0.78rem] px-1.5 py-0.5 border border-[#2563EB] rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]/30"
+                    onFocus={e => e.target.select()} />
+                  {inlineSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin text-neutral-400 shrink-0" />}
+                </div>
+              </div>
+            )}
 
             {/* ── 集团公共 ── */}
             {companySpaces(null).length > 0 && (
@@ -252,8 +363,22 @@ function PermBadge({ perm }: { perm: string }) {
                   onContextMenu={e => handleCtx(e, { id: 'yuan-group', name: '集团公共', isSpace: true })}>
                   {expanded.has('yuan-group') ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
                   <Folder size={14} strokeWidth={1.5} className="text-[#2563EB]" /><span>集团公共</span>
-                  <span className="text-[0.62rem] text-neutral-400 ml-auto">{companySpaces(null).reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)}</span>
+                  <span className="text-[0.62rem] text-neutral-400 ml-auto" title={`${companySpaces(null).reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)} 个文档`}>{companySpaces(null).reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)}</span>
                 </div>
+                {/* Inline create under yuan-group */}
+                {inlineCreate?.parentId === 'yuan-group' && (
+                  <div className="py-0.5 px-2 ml-4">
+                    <div className="flex items-center gap-1.5 px-2 py-1">
+                      <Folder size={13} strokeWidth={1.5} className="text-[#60A5FA] opacity-60" />
+                      <input autoFocus value={inlineCreate.name}
+                        onChange={e => setInlineCreate({ parentId: 'yuan-group', name: e.target.value })}
+                        onKeyDown={handleInlineKeyDown} onBlur={saveInlineFolder} disabled={inlineSaving}
+                        className="flex-1 text-[0.78rem] px-1.5 py-0.5 border border-[#2563EB] rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]/30"
+                        onFocus={e => e.target.select()} />
+                      {inlineSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin text-neutral-400 shrink-0" />}
+                    </div>
+                  </div>
+                )}
                 {expanded.has('yuan-group') && companySpaces(null).map(s => (
                   <div key={s.id}>
                     <div onClick={() => goToDocuments(s.id)}
@@ -261,7 +386,7 @@ function PermBadge({ perm }: { perm: string }) {
                       className="flex items-center gap-1.5 py-1.5 px-2 ml-4 text-[0.78rem] text-neutral-600 cursor-pointer hover:bg-neutral-50 rounded-md">
                       <Folder size={13} strokeWidth={1.5} className="text-[#2563EB]" />{s.name}
                       <PermBadge perm={folderPerms[s.id] || 'none'} />
-                      {(docCounts.get(s.id) || 0) > 0 && <span className="text-[0.62rem] text-neutral-400 ml-auto">{docCounts.get(s.id)}</span>}
+                      {(docCounts.get(s.id) || 0) > 0 && <span className="text-[0.62rem] text-neutral-400 ml-auto" title={`${docCounts.get(s.id)} 个文档`}>{docCounts.get(s.id)}</span>}
                     </div>
                     {/* Inline create under group space */}
                     {inlineCreate?.parentId === s.id && (
@@ -295,8 +420,22 @@ function PermBadge({ perm }: { perm: string }) {
                     onContextMenu={e => handleCtx(e, { id: compKey, name: c.name, isSpace: true })}>
                     {isOpen ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
                     <Folder size={14} strokeWidth={1.5} className="text-[#2563EB]" /><span>{c.name}</span>
-                    <span className="text-[0.62rem] text-neutral-400 ml-auto">{cspaces.reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)}</span>
+                    <span className="text-[0.62rem] text-neutral-400 ml-auto" title={`${cspaces.reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)} 个文档`}>{cspaces.reduce((s, sp) => s + (docCounts.get(sp.id) || 0), 0)}</span>
                   </div>
+                  {/* Inline create under company node */}
+                  {inlineCreate?.parentId === compKey && (
+                    <div className="py-0.5 px-2 ml-4">
+                      <div className="flex items-center gap-1.5 px-2 py-1">
+                        <Folder size={13} strokeWidth={1.5} className="text-[#60A5FA] opacity-60" />
+                        <input autoFocus value={inlineCreate.name}
+                          onChange={e => setInlineCreate({ parentId: compKey, name: e.target.value })}
+                          onKeyDown={handleInlineKeyDown} onBlur={saveInlineFolder} disabled={inlineSaving}
+                          className="flex-1 text-[0.78rem] px-1.5 py-0.5 border border-[#2563EB] rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]/30"
+                          onFocus={e => e.target.select()} />
+                        {inlineSaving && <Loader2 size={12} strokeWidth={2} className="animate-spin text-neutral-400 shrink-0" />}
+                      </div>
+                    </div>
+                  )}
                   {isOpen && cspaces.map(s => (
                     <TreeFolder key={s.id} folder={s} folderPerms={folderPerms} depth={1} folders={folders}
                       expanded={expanded} activeId={activeId} docCounts={docCounts}
@@ -335,31 +474,40 @@ function PermBadge({ perm }: { perm: string }) {
       {/* Context menu */}
       {ctxMenu && (
         <>
-          <div className="fixed inset-0 z-50" onClick={() => setCtxMenu(null)} onContextMenu={e => { e.preventDefault(); setCtxMenu(null) }} />
-          <div className="fixed z-50 bg-white rounded-lg shadow-lg border border-neutral-200 py-1 min-w-[160px]" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-            <div className="px-3 py-1.5 text-[0.68rem] text-neutral-400 uppercase tracking-wider border-b border-neutral-100">{ctxMenu.folder.name}</div>
-            {isReal(ctxMenu.folder.id) && (
-              <button onClick={() => ctxNewFolder(ctxMenu.folder.id)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
-                <Folder size={14} strokeWidth={1.5} className="text-blue-500" />新建子文件夹
-              </button>
-            )}
-            {isReal(ctxMenu.folder.id) && (
-              <button onClick={() => ctxStartRename(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>重命名
-              </button>
-            )}
-            <button onClick={() => ctxPermissions(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>权限管理
-            </button>
-            {isReal(ctxMenu.folder.id) && (
-              <>
-                <div className="border-t border-neutral-100" />
-                <button onClick={() => ctxDelete(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-red-500 hover:bg-red-50 flex items-center gap-2">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除
+          <div className="fixed inset-0 z-[60]" onClick={() => setCtxMenu(null)} onContextMenu={e => { e.preventDefault(); setCtxMenu(null) }} />
+          {(() => {
+            // 虚拟节点不能重命名/删除，只能新建子文件夹
+            const isVirtualNode = !isReal(ctxMenu.folder.id)
+            const canModify = !isVirtualNode
+            return (
+              <div ref={ctxMenuRef} className="fixed z-[70] bg-white rounded-lg shadow-lg border border-neutral-200 py-1 min-w-[160px]" style={{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }}>
+                <div className="px-3 py-1.5 text-[0.68rem] text-neutral-400 uppercase tracking-wider border-b border-neutral-100">{ctxMenu.folder.name}</div>
+                {/* 虚拟节点和真实节点都可以新建子文件夹 */}
+                <button onClick={() => ctxNewFolder(ctxMenu.folder.id)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
+                  <Folder size={14} strokeWidth={1.5} className="text-blue-500" />新建子文件夹
                 </button>
-              </>
-            )}
-          </div>
+                {/* 只有真实节点才能重命名和删除 */}
+                {canModify && (
+                  <button onClick={() => ctxStartRename(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>重命名
+                  </button>
+                )}
+                {canModify && (
+                  <button onClick={() => ctxPermissions(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-neutral-700 hover:bg-neutral-50 flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>权限管理
+                  </button>
+                )}
+                {canModify && (
+                  <>
+                    <div className="border-t border-neutral-100" />
+                    <button onClick={() => ctxDelete(ctxMenu.folder)} className="w-full text-left px-3 py-2 text-[0.78rem] text-red-500 hover:bg-red-50 flex items-center gap-2">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除
+                    </button>
+                  </>
+                )}
+              </div>
+            )
+          })()}
         </>
       )}
 

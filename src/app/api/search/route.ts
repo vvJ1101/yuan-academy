@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 import { prisma } from '@/lib/prisma'
 
 const DB_PATH = path.join(process.cwd(), 'prisma', 'dev.db')
@@ -19,8 +20,11 @@ interface SearchResult {
 }
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.search', '你没有使用搜索的权限')
+  if (!guard.ok) return guard.response
+
+  const activeSession = session!
 
   const { searchParams } = new URL(req.url)
   const q = searchParams.get('q')?.trim()
@@ -67,11 +71,11 @@ export async function GET(req: NextRequest) {
     const results = db.prepare(sql).all(...params) as any[]
 
     // Permission filter: only return documents the user can access
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(activeSession)
     const accessibleIds = Object.keys(where).length === 0
       ? results.map((r: any) => r.id) // super_admin: all results
       : (await prisma.document.findMany({
-          where: { ...where, id: { in: results.map((r: any) => r.id) } },
+          where: { AND: [{ id: { in: results.map((r: any) => r.id) } }, where] },
           select: { id: true },
         })).map(d => d.id)
 

@@ -1,25 +1,26 @@
- import { NextRequest, NextResponse } from 'next/server'
- import { prisma } from '@/lib/prisma'
- import { getSessionFromCookies } from '@/lib/auth'
- 
- function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
- 
- export async function POST(req: NextRequest) {
-   const session = getSessionFromCookies(req.headers.get('cookie'))
-   if (!session?.id || session.role !== 'super_admin') return forbid()
- 
-   const { action, ids } = await req.json()
- 
-   if (action !== 'delete') {
-     return NextResponse.json({ error: '仅支持 delete 操作' }, { status: 400 })
-   }
- 
-   if (!Array.isArray(ids) || ids.length === 0) {
-     return NextResponse.json({ error: '请选择要删除的用户' }, { status: 400 })
-   }
- 
-   // 不能删除自己
-   const filteredIds = ids.filter(id => id !== session.id)
+import { NextRequest, NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
+import { clearPermissionCache } from '@/lib/permissions/rbac'
+
+export async function POST(req: NextRequest) {
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'user.batchDelete', '无权批量删除用户')
+  if (!guard.ok) return guard.response
+
+  const { action, ids } = await req.json()
+
+  if (action !== 'delete') {
+    return NextResponse.json({ error: '仅支持 delete 操作' }, { status: 400 })
+  }
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: '请选择要删除的用户' }, { status: 400 })
+  }
+
+  // 不能删除自己
+  const filteredIds = ids.filter(id => id !== session!.id)
    const skippedSelf = ids.length - filteredIds.length
  
    // 不能删除其他 super_admin
@@ -48,6 +49,7 @@
        await prisma.userCompany.deleteMany({ where: { userId: id } })
        await prisma.auditLog.deleteMany({ where: { userId: id } })
        await prisma.user.delete({ where: { id } })
+       clearPermissionCache(id)
        deleted++
      } catch (err) {
        console.error(`[批量删除用户] 删除用户 ${id} 失败:`, err)
@@ -58,7 +60,7 @@
    try {
      await prisma.auditLog.create({
        data: {
-         userId: session.id,
+         userId: session!.id,
          action: `batch_delete_users:${deleted}个`,
        },
      })

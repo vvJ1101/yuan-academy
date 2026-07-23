@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 // POST — record a view event
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { documentId, action } = await req.json()
@@ -18,10 +19,9 @@ export async function POST(req: NextRequest) {
 
 // GET — recent activity (admin only)
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'audit.view', '你没有查看审计日志的权限')
+  if (!guard.ok) return guard.response
 
   const logs = await prisma.auditLog.findMany({
     take: 50,

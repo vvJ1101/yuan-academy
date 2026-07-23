@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookiesAsync } from '@/lib/auth'
 import { getPolicyTemplatePath } from '@/lib/policy-store'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -11,6 +12,9 @@ export async function GET(request: NextRequest) {
   if (!session?.id) {
     return NextResponse.json({ error: '请先登录' }, { status: 401 })
   }
+
+  const uploadGuard = await requirePermission(session, 'brandOrdering.upload', '无权下载订货政策上传模板')
+  if (!uploadGuard.ok) return uploadGuard.response
 
   try {
     const template = new Uint8Array(readFileSync(getPolicyTemplatePath()))

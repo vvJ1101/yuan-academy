@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
 import { prisma } from '@/lib/prisma'
+import { requirePermission } from '@/lib/permissions/guards'
 
 type Intent = 'question' | 'document' | 'sop' | 'howto'
 
@@ -29,8 +30,10 @@ Examples:
 Query: `
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'ai.search', '你没有使用 AI 搜索的权限')
+  if (!guard.ok) return guard.response
+  const activeSession = session!
 
   const { query } = await req.json().catch(() => ({}))
   if (!query?.trim()) return NextResponse.json({ error: 'Query required' }, { status: 400 })
@@ -38,7 +41,7 @@ export async function POST(req: NextRequest) {
   const q = query.trim()
 
   // Step 1: FTS search (always get document context)
-  const ftsDocs = await ftsSearch(q, session)
+  const ftsDocs = await ftsSearch(q, activeSession)
 
   // Step 2: Intent classification
   let intent: Intent = 'document'
@@ -102,7 +105,7 @@ async function ftsSearch(q: string, session: any) {
     db.close()
 
     // Fallback to LIKE if FTS returns nothing
-    const where = buildDocumentWhere(session)
+    const where = await buildDocumentWhere(session)
     if (docIds.length > 0) {
       const docs = await prisma.document.findMany({
         where: { ...where, id: { in: docIds } },
@@ -111,6 +114,12 @@ async function ftsSearch(q: string, session: any) {
           audiences: { include: { department: { select: { slug: true } } }, take: 1 } },
         take: 10,
       })
+      return docs.map(d => ({ id: d.id, title: d.title, snippet: '',
+        department: d.ownerDept?.name || '',
+        category: d.category,
+        slug: d.slug,
+        audienceSlug: d.audiences?.[0]?.department?.slug || d.ownerDept?.slug || '',
+      }))
     }
 
     // Fallback: LIKE-based search if FTS returned nothing

@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getSessionFromCookies, canManageUsers } from '@/lib/auth'
+import { getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
+import { clearPermissionCache } from '@/lib/permissions/rbac'
 import { hash } from 'bcryptjs'
 
-function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || !canManageUsers(session)) return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.admin.users', '无权查看用户管理')
+  if (!guard.ok) return guard.response
 
   const users = await prisma.user.findMany({
     select: {
@@ -24,8 +25,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'user.create', '无权新建用户')
+  if (!guard.ok) return guard.response
 
   const { email, name, password, role, companyId, departmentId, companyIds } = await req.json()
   if (!email || !password) return NextResponse.json({ error: 'Email and password required' }, { status: 400 })
@@ -43,12 +45,14 @@ export async function POST(req: NextRequest) {
       await (prisma as any).userCompany.create({ data: { userId: user.id, companyId: cid } }).catch((err: any) => console.error("[AuditLogError]", err))
     }
   }
+  prisma.auditLog.create({ data: { userId: session!.id, action: "user:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(user, { status: 201 })
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'user.edit', '无权编辑用户')
+  if (!guard.ok) return guard.response
 
   const { id, name, role, companyId, departmentId, password, companyIds } = await req.json()
   if (!id) return NextResponse.json({ error: 'User ID required' }, { status: 400 })
@@ -67,7 +71,7 @@ export async function PUT(req: NextRequest) {
   if (password) {
     try {
       await prisma.auditLog.create({
-        data: { userId: session.id, action: `admin_reset_password:${id}` },
+        data: { userId: session!.id, action: `admin_reset_password:${id}` },
       })
     } catch {
       console.error('[AUDIT] 管理员重置密码审计日志写入失败')
@@ -81,17 +85,22 @@ export async function PUT(req: NextRequest) {
       await (prisma as any).userCompany.create({ data: { userId: id, companyId: cid } }).catch((err: any) => console.error("[AuditLogError]", err))
     }
   }
+  clearPermissionCache(id)
+  prisma.auditLog.create({ data: { userId: session!.id, action: "user:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(user)
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'user.delete', '无权删除用户')
+  if (!guard.ok) return guard.response
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'User ID required' }, { status: 400 })
   await (prisma as any).userCompany.deleteMany({ where: { userId: id } })
   await prisma.user.delete({ where: { id } })
+  clearPermissionCache(id)
+  prisma.auditLog.create({ data: { userId: session!.id, action: "user:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ ok: true })
 }

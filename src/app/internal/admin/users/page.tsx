@@ -15,6 +15,10 @@ const roleLabels: Record<string, string> = {
   super_admin: '超级管理员', dept_admin: '部门管理员', staff: '普通员工',
 }
 
+function can(permissions: string[], key: string) {
+  return permissions.includes('*') || permissions.includes(key)
+}
+
 interface Dept {
   id: string; name: string; slug: string
   companyId: string; company: { id: string; name: string; slug: string }
@@ -37,17 +41,27 @@ export default function UsersPage() {
   const [messageType, setMessageType] = useState<'success' | 'error'>('success')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [batchDeleting, setBatchDeleting] = useState(false)
+  const [permissions, setPermissions] = useState<string[]>([])
+
+  const canCreateUser = can(permissions, 'user.create')
+  const canEditUser = can(permissions, 'user.edit')
+  const canDeleteUser = can(permissions, 'user.delete')
+  const canBatchDeleteUser = can(permissions, 'user.batchDelete')
+  const canResetPassword = can(permissions, 'user.resetPassword')
 
   async function loadData() {
     try {
-      const [usersRes, deptsRes, companiesRes] = await Promise.all([
+      const [meRes, usersRes, deptsRes, companiesRes] = await Promise.all([
+        fetch('/api/auth/me'),
         fetch('/api/users'),
         fetch('/api/departments'),
         fetch('/api/companies'),
       ])
+      const meData = await meRes.json()
       const usersData = await usersRes.json()
       const deptsData = await deptsRes.json()
       const companiesData = await companiesRes.json()
+      if (Array.isArray(meData?.permissions)) setPermissions(meData.permissions)
       if (Array.isArray(usersData)) setUsers(usersData)
       if (Array.isArray(deptsData)) setDepartments(deptsData)
       if (Array.isArray(companiesData)) setCompanies(companiesData)
@@ -75,6 +89,19 @@ export default function UsersPage() {
   async function handleSubmit(e?: React.FormEvent) {
     if (e) e.preventDefault()
     setMessage('')
+
+    if (editingId && !canEditUser) {
+      setMessageType('error'); setMessage('你没有编辑用户的权限')
+      return
+    }
+    if (!editingId && !canCreateUser) {
+      setMessageType('error'); setMessage('你没有新建用户的权限')
+      return
+    }
+    if (editingId && form.password && !canResetPassword) {
+      setMessageType('error'); setMessage('你没有重置用户密码的权限')
+      return
+    }
 
     if (editingId) {
       const res = await fetch('/api/users', {
@@ -118,6 +145,10 @@ export default function UsersPage() {
   }
 
   function startEdit(u: User) {
+    if (!canEditUser) {
+      setMessageType('error'); setMessage('你没有编辑用户的权限')
+      return
+    }
     setForm({
       email: u.email, name: u.name, password: '',
       role: u.role, companyId: u.companyId || '', departmentId: u.departmentId || '',
@@ -132,6 +163,10 @@ export default function UsersPage() {
   }
 
   async function handleDelete(id: string) {
+    if (!canDeleteUser) {
+      setMessageType('error'); setMessage('你没有删除用户的权限')
+      return
+    }
     if (!confirm('确定删除该用户？')) return
     await fetch(`/api/users?id=${id}`, { method: 'DELETE' })
     loadData()
@@ -139,6 +174,10 @@ export default function UsersPage() {
 
   // 批量删除
   async function handleBatchDelete() {
+    if (!canBatchDeleteUser) {
+      setMessageType('error'); setMessage('你没有批量删除用户的权限')
+      return
+    }
     const ids = Array.from(selectedIds)
     if (ids.length === 0) return
     if (!confirm(`确定要删除选中的 ${ids.length} 个用户？此操作不可撤销。`)) return
@@ -193,14 +232,16 @@ export default function UsersPage() {
           <h1 className="text-[1.3rem] md:text-[1.5rem] font-semibold tracking-[-0.02em] text-neutral-900 mb-1">用户管理</h1>
           <p className="text-[0.8rem] md:text-[0.85rem] text-neutral-500 font-normal">{users.length} 个用户</p>
         </div>
-        <button onClick={() => { resetForm(); setShowForm(true) }}
-          className="px-4 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors">
-          新建用户
-        </button>
+        {canCreateUser && (
+          <button onClick={() => { resetForm(); setShowForm(true) }}
+            className="px-4 py-2 bg-[#2563EB] text-white text-[0.8rem] font-medium rounded-lg hover:bg-blue-600 transition-colors">
+            新建用户
+          </button>
+        )}
       </div>
 
       {/* 批量操作栏 */}
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && canBatchDeleteUser && (
       <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
         <span className="text-[0.82rem] text-amber-800 font-normal">
           已选择 <strong>{selectedIds.size}</strong> 个用户
@@ -255,12 +296,14 @@ export default function UsersPage() {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
+              {(!editingId || canResetPassword) && (
               <div>
                 <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">密码{editingId ? '（留空不修改）' : ''}</label>
                 <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })}
                   className="w-full px-3 py-2 border border-neutral-300 rounded-md text-[0.82rem] focus:outline-none focus:border-neutral-900 font-normal"
                   required={!editingId} />
               </div>
+              )}
               <div>
                 <label className="block text-[0.7rem] font-medium text-neutral-700 mb-1">角色</label>
                 <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}
@@ -358,8 +401,8 @@ export default function UsersPage() {
                     {new Date(u.createdAt).toLocaleDateString('zh-CN')}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button onClick={() => startEdit(u)} className="text-[0.72rem] text-neutral-600 hover:text-neutral-900 mr-3">编辑</button>
-                    <button onClick={() => handleDelete(u.id)} className="text-[0.72rem] text-red-500 hover:text-red-700">删除</button>
+                    {canEditUser && <button onClick={() => startEdit(u)} className="text-[0.72rem] text-neutral-600 hover:text-neutral-900 mr-3">编辑</button>}
+                    {canDeleteUser && <button onClick={() => handleDelete(u.id)} className="text-[0.72rem] text-red-500 hover:text-red-700">删除</button>}
                   </td>
                 </tr>
               ))}

@@ -101,7 +101,7 @@ export function TreeFolder({
           <Folder size={13} strokeWidth={1.5} className={isActive ? 'text-[#2563EB]' : 'text-[#60A5FA]'} />
           <span className="flex-1 truncate">{folder.name}</span>
           <PermBadge perm={userPerm} />
-          {(docCounts.get(folder.id) || 0) > 0 && <span className="text-[0.62rem] ml-auto text-neutral-400">{docCounts.get(folder.id)}</span>}
+          {(docCounts.get(folder.id) || 0) > 0 && <span className="text-[0.62rem] ml-auto text-neutral-400" title={`${docCounts.get(folder.id)} 个文档`}>{docCounts.get(folder.id)}</span>}
         </div>
       )}
 

@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.dashboard', '无权查看首页看板')
+  if (!guard.ok) return guard.response
+
+  const activeSession = session!
 
   // Unified permission: ownerDept OR audience includes user's department
-  const docWhere = buildDocumentWhere(session)
+  const docWhere = await buildDocumentWhere(activeSession)
 
   const [
     docCount, deptCount, companyCount,
@@ -69,7 +73,7 @@ export async function GET(req: NextRequest) {
   if (popularDocIds.length > 0) {
     const ids = popularDocIds.map((g: any) => g.documentId).filter(Boolean) as string[]
     const docs = await prisma.document.findMany({
-      where: { id: { in: ids } },
+      where: { AND: [{ id: { in: ids } }, docWhere] },
       select: {
         id: true, title: true, slug: true, category: true,
         ownerDept: { select: { name: true, slug: true } },

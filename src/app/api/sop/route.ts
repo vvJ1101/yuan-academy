@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionFromCookies } from '@/lib/auth'
 import { buildDocumentWhere } from '@/lib/permissions/documents'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'menu.sop', '无权查看 SOP 流程')
+  if (!guard.ok) return guard.response
 
-  const where = buildDocumentWhere(session)
+  const activeSession = session!
+  const where = await buildDocumentWhere(activeSession)
   const { searchParams } = new URL(req.url)
   const stage = searchParams.get('stage')
 

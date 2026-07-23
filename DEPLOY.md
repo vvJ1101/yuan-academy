@@ -5,49 +5,76 @@
 | 项目 | 值 |
 |------|-----|
 | **生产域名** | https://academy.yuanshowroom.cn |
-| **服务器 IP** | `120.79.162.27` |
-| **SSH 用户** | `root` |
-| **SSH 密码** | `Huang991208` |
+| **服务器地址** | 从安全的密码管理器或运维平台获取 |
+| **SSH 用户** | 从安全的密码管理器或运维平台获取 |
+| **SSH 凭据** | 禁止写入本文档或提交到 Git |
 | **项目路径** | `/var/www/yuan-academy` |
-| **PM2 进程名** | `yuan-academy`（fork 单实例，512MB 上限） |
+| **PM2 进程名** | `yuan-academy-blue`、`yuan-academy-green`（蓝绿双实例，512MB 上限） |
 
 ## 环境变量（生产）
 
 环境变量在服务器 `.env.local` 中，**不要提交到 Git**：
 
 ```
-DEEPSEEK_API_KEY=<从本地.env.local获取>
-JWT_SECRET=353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6
+DEEPSEEK_API_KEY=<从密码管理器或部署平台注入>
+JWT_SECRET=<使用密码生成器创建的高强度随机值>
 NODE_ENV=production
 ```
 
+生产凭据只允许保存在服务器环境文件、GitHub Actions Secrets 或公司密码管理器中。禁止在 Markdown、源码、提交记录和聊天记录中保存真实值。若凭据曾进入 Git 历史，必须立即轮换；仅删除当前文件中的文字并不能撤销已经泄露的凭据。
+
 ## 部署工作流
+
+### 当前强制规范（2026-07-23）
+
+Academy 已切换为轻量 standalone 部署。生产服务器内存有限，部署必须遵守：
+
+1. **构建在本地或 CI 完成**，服务器只接收可运行包。
+2. **禁止在生产服务器执行 `npm install` / `npm run build`**；确需执行时，必须先说明风险并得到确认。
+3. PM2 运行 `server.js`，不再依赖 `node_modules/.bin/next`。
+4. 蓝绿部署只在部署窗口短暂双实例；`--activate` 后默认停止旧颜色实例。
+5. 订货政策等私有数据固定保存在 `/var/www/yuan-academy-shared/data/private`，颜色目录只建立软链接。
+6. `.env.local`、`prisma/dev.db`、`public/uploads/`、共享私有数据目录不得被 rsync、tar 解压或清理命令覆盖。
+7. 每次部署后必须验证：公网 `/login=200`，本机当前端口 `/login=200`，匿名 `/api/policies=401`，订货政策 JSON 非空。
+8. nginx 静态图标规则必须指向 live 目录的 `public/`：`/favicon.ico`、`/favicon.png`、`/apple-icon.png` 不得继续指向旧 `.next/static/../` 路径。
 
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
-- SSH 免密登录已配置：`ssh root@120.79.162.27`
-- 本地 Node.js >= 18
+- SSH 登录信息已通过安全渠道配置
+- 本地 Node.js >= 20.16.0；部署前运行 `node -v` 确认版本
+- 服务器部署前同样运行 `node -v`，确认 Node.js >= 20.16.0
 
-### 一键部署脚本
+### 推荐部署脚本
 
 ```bash
 cd /Users/vv/Documents/YUAN开发/yuan-academy
-bash scripts/deploy-local.sh
+# 必须先确认本地 Node.js >= 20.16.0
+node -v
+bash scripts/deploy-blue-green.sh --dry-run
+bash scripts/deploy-blue-green.sh --deploy-only
+bash scripts/deploy-blue-green.sh --activate
 ```
 
 脚本自动执行：
-1. 本地 `npm run build`（保留 `.next/cache` 加速增量编译）
-2. `xattr -cr` 清除 macOS 扩展属性
-3. tar 打包构建产物（排除 `*.map` 文件）
-4. scp 传输到服务器
-5. 服务器备份旧 `.next` → 解压新版本 → 校验 BUILD_ID
-6. PM2 重启 + 健康检查（失败自动回滚）
+1. 本地 `npm run build` 生成 standalone 产物。
+2. 打包 `.next/standalone`、`.next/static` 和 `public/`（排除上传文件）。
+3. 上传到备用颜色目录。
+4. 服务器只解压可运行包，不安装依赖、不构建。
+5. PM2 用 `server.js` 启动备用颜色。
+6. 健康检查通过后切换 nginx upstream。
+7. 默认停止旧颜色实例以释放内存。
 
-### 手动分步部署
+`scripts/deploy-local.sh` 是旧 `.next` 部署脚本，不再作为生产首选；除非明确回滚旧部署模式，否则不要使用。
+
+### 旧手动分步部署（仅作历史参考）
+
+以下流程会把完整源码和 `.next` 产物同步到服务器，且容易诱导在生产机补依赖。当前生产已改为 standalone 方案，正常上线不要使用本节。
 
 ```bash
 # 1. 本地构建
 cd /Users/vv/Documents/YUAN开发/yuan-academy
+# 必须确认输出版本 >= 20.16.0
+node -v
 [ -d .next ] && find .next -maxdepth 1 ! -name .next ! -name cache -exec rm -rf {} +
 NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
@@ -71,6 +98,8 @@ scp /tmp/next-build.tar root@120.79.162.27:/tmp/
 # 4. 服务器部署
 ssh root@120.79.162.27 "
   cd /var/www/yuan-academy
+  # 必须确认输出版本 >= 20.16.0，否则停止部署并先升级 Node.js
+  node -v
   
   # 备份并解压
   rm -rf .next.backup
@@ -127,6 +156,81 @@ ssh root@120.79.162.27 "
 "
 ```
 
+### 无感部署方向（蓝绿发布）
+
+旧的 `scripts/deploy-local.sh` 是“本地构建 + 上传构建包 + 替换 `.next` + PM2 单实例重启”。它有健康检查和失败回滚，但 PM2 重启的几秒内仍可能短暂不可用。
+
+生产环境已在 2026-07-21 初始化为蓝绿结构：
+
+- 当前线上颜色由 `/var/www/yuan-academy-current` 记录。
+- 当前 live 目录由 `/var/www/yuan-academy-live` 软链接指向。
+- `blue` 使用 `/var/www/yuan-academy-blue` 和端口 `3001`。
+- `green` 使用 `/var/www/yuan-academy-green` 和端口 `3003`。
+- nginx 通过 `/etc/nginx/conf.d/yuan-academy-upstream.conf` 切换 `yuan_academy_upstream`。
+- `3002` 属于官网 `yuan-website`，不得用于 Academy。
+
+若要做到用户无感，建议改成蓝绿发布：
+
+1. 生产保留两个运行目录，例如 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green`。
+2. 当前线上实例继续服务旧版本，例如 `yuan-academy-blue` 监听 `3001`。
+3. 新版本部署到备用目录，例如 `yuan-academy-green`，监听备用端口 `3003`；`3002` 已被官网 `yuan-website` 使用，不作为 Academy 备用端口。
+4. 先对备用端口做健康检查：`/login` 必须返回 `200`，受保护 API 匿名访问必须返回 `401`。
+5. 健康检查通过后，只切换 nginx upstream 到新端口并执行 `nginx -s reload`；reload 是平滑的，旧连接不会被立即断开。
+6. 保留旧实例一段时间，确认无异常后再停止；如新版本异常，立刻把 nginx upstream 切回旧端口。
+
+落地前需要新增：
+
+- 两套 PM2 进程：`yuan-academy-blue`、`yuan-academy-green`。
+- nginx upstream 配置模板。
+- 蓝绿部署脚本：选择空闲颜色、部署、启动备用端口、健康检查、切换 nginx、记录当前颜色。
+- 回滚脚本：只切 nginx 回旧颜色，不重新构建。
+
+生产部署优先使用蓝绿脚本；如果网站已经不可用，优先恢复服务，再按备份和 upstream 状态回滚。
+
+### 轻量 standalone 蓝绿部署脚本（试运行/预部署）
+
+当前部署脚本：`scripts/deploy-blue-green.sh`。它在本地构建 Next.js standalone 产物，只把可运行包上传到服务器；服务器不再执行 `npm install`、不再依赖完整源码目录和 `node_modules/.bin/next`。
+
+安全约束：
+
+- 默认 `--dry-run` 只读取状态，不修改服务器。
+- `--deploy-only` 只部署并启动备用端口，不切换线上流量。
+- `--activate` 会切换 nginx，属于生产流量变更，执行前必须得到明确确认。
+- `--activate` 前要求 nginx 已经使用 `yuan_academy_upstream` upstream；如果服务器还没做一次性 nginx 初始化，脚本会拒绝切换。
+- 脚本会排除 `.env*`、`prisma/dev.db*`、`public/uploads/`、`data/private/`，避免把密钥、数据库、上传文件或私有政策数据覆盖到 Git/构建包同步范围。
+- 切换时会同步更新 `/var/www/yuan-academy-live` 软链接，nginx 静态资源和上传文件应读取该 live 目录，避免 HTML 与 CSS/JS 构建版本不一致。
+- 默认不在低配生产机现场执行 `npm install`。依赖由本地 `.next/standalone` 产物携带。
+- `--activate` 后默认停止旧颜色 PM2 进程，只保留当前线上颜色，降低 2G 服务器常驻内存压力；如需临时保留旧颜色，执行时设置 `KEEP_OLD_AFTER_ACTIVATE=1`。
+- 订货政策等私有运行数据固定保存在 `/var/www/yuan-academy-shared/data/private`，颜色目录只建立软链接，避免部署清理运行目录时断开数据。
+
+常用命令：
+
+```bash
+cd /Users/vv/Documents/YUAN开发/yuan-academy
+
+# 1. 查看蓝绿状态，不修改生产
+bash scripts/deploy-blue-green.sh --dry-run
+
+# 2. 构建并部署到备用颜色，只验证备用端口，不切流量
+bash scripts/deploy-blue-green.sh --deploy-only
+
+# 3. 健康检查通过后，切换 nginx 到备用颜色（必须先确认）
+bash scripts/deploy-blue-green.sh --activate
+```
+
+一次性服务器初始化要求：
+
+1. 创建 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green` 两套运行目录。
+2. 两套目录共用同一个 `.env.local`、`prisma/dev.db`，私有运行数据统一放在 `/var/www/yuan-academy-shared/data/private`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
+3. 创建 `/var/www/yuan-academy-live` 软链接指向当前颜色目录；nginx 的上传目录和 `/_next/static` 静态资源都读取 live 目录。
+4. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
+5. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理，但默认只让当前颜色常驻运行。
+
+回滚方式：
+
+- 如果新颜色已部署但未 `--activate`，不需要回滚，线上仍在旧颜色。
+- 如果已经 `--activate` 后发现异常，把 `/etc/nginx/conf.d/yuan-academy-upstream.conf` 切回旧端口并执行 `nginx -t && nginx -s reload` 即可；旧 PM2 进程会保留运行，避免重新构建。
+
 ## 服务器配置
 
 ### 当前状态
@@ -137,9 +241,9 @@ ssh root@120.79.162.27 "
 | **RAM** | 1.6 GB |
 | **Swap** | 2 GB（已激活） |
 | **磁盘** | 40 GB（约 11GB 已用） |
-| **PM2 模式** | fork，单实例，512MB 内存上限 |
-| **Node.js** | v20.x |
-| **端口** | 3001（Next.js）← nginx 代理 443（HTTPS） |
+| **PM2 模式** | fork，蓝绿双实例，单实例 512MB 内存上限 |
+| **Node.js** | 运行要求 >= v20.16.0；生产实际版本未在本次本地开发中核验，部署前执行 `node -v` |
+| **端口** | blue:3001，green:3003，nginx 代理 443（HTTPS）到当前颜色；官网占用 3002 |
 
 ### 确认服务器运行状态
 
@@ -148,7 +252,9 @@ ssh root@120.79.162.27 "
 ssh root@120.79.162.27 "
   pm2 list
   free -m | grep -E 'Mem|Swap'
-  curl -s -o /dev/null -w '%{http_code}' http://localhost:3001/login
+  curl -s -o /dev/null -w 'blue:%{http_code}\n' http://localhost:3001/login
+  curl -s -o /dev/null -w 'green:%{http_code}\n' http://localhost:3003/login
+  cat /var/www/yuan-academy-current
   df -h /
 "
 ```
@@ -184,7 +290,106 @@ cp prisma/dev.db /var/backups/yuan-academy-$(date +%Y%m%d).db
 | POST | `/api/admin/policy/ai-generate` | AI 生成政策结构化布局（super_admin，DeepSeek） |
 | GET | `/api/admin/policy/layout?brand=xxx` | 获取指定品牌的 AI 布局 |
 | PUT | `/api/admin/policy/layout` | 保存 AI 生成的品牌布局（super_admin） |
-| GET | `/showroom/data/policies.json` | 订货政策原始数据（14 品牌，11 字段） |
+| GET | `/api/policies` | 登录用户读取私有订货政策，响应禁止公共缓存 |
+| GET | `/api/policies/template` | 登录用户下载私有上传模板 |
+
+旧的 `/data/policies.json`、`/showroom/data/policies.json` 和公开模板路径已经停用，不得恢复。
+
+## 订货政策私有数据部署
+
+订货政策运行数据不提交到 Git，也不包含在 `.next` 或 standalone 构建包中。首次部署、迁移服务器或重建 `/var/www/yuan-academy` 时，必须单独配置共享私有目录：
+
+```text
+/var/www/yuan-academy-shared/data/private/policies/
+├── policies.json
+├── policies.updated.json
+├── policies.backup.json
+└── 订货政策-上传模板.xlsx
+```
+
+运行目录中只保留软链接：
+
+```text
+/var/www/yuan-academy/data/private -> /var/www/yuan-academy-shared/data/private
+```
+
+目录权限设为 `750`，文件权限设为 `640`。传输应先进入服务器临时目录，校验 JSON 后再通过 `install` 原子写入目标位置。不得把这些文件复制到 `public/`、`.next/static/`、standalone 包或 Nginx 静态目录。
+
+部署后验证：
+
+```bash
+ssh root@120.79.162.27 '
+  set -e
+  cd /var/www/yuan-academy
+  test "$(readlink -f data/private)" = "/var/www/yuan-academy-shared/data/private"
+  test "$(stat -c %a /var/www/yuan-academy-shared/data/private/policies)" = 750
+  node -e "const p=require(\"./data/private/policies/policies.json\"); const rows=Array.isArray(p)?p:p.policies; if(!Array.isArray(rows)||rows.length===0) process.exit(1); console.log(rows.length)"
+  test ! -e public/data/policies.json
+  test ! -e public/showroom/data/policies.json
+  test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/api/policies)" = 401
+'
+```
+
+登录态还需在浏览器访问 `/internal/policy`，确认品牌数量和更新时间正常显示。自动部署不得删除 `/var/www/yuan-academy-shared/data/private/`；使用 `rsync --delete`、`find ... -exec rm -rf` 或解压覆盖时必须把该目录排除在外。
+
+### 2026-07-23 502 与订货数据恢复记录
+
+故障现象：
+
+- Academy 出现 502 / 无法访问。
+- 服务器重启后内存仍高，SSH 一度在握手阶段超时。
+- 恢复访问后，订货政策页面显示数据为空。
+
+根因：
+
+- 旧蓝绿脚本在服务器侧依赖 `node_modules/.bin/next`，目录被清理或依赖入口缺失后 PM2 无法启动，导致 nginx 代理到不可用后端。
+- 2G 服务器上现场执行 `npm install` 会造成高 IO/高内存压力，甚至拖慢 SSH 和公网响应。
+- 切换 standalone 运行目录后，私有政策数据没有固定到共享目录，导致当前运行目录缺少 `data/private/policies`。
+
+处理：
+
+- Next.js 开启 `output: 'standalone'`。
+- 部署脚本改为本地构建并上传 standalone 可运行包。
+- PM2 改为运行 `server.js`。
+- `--activate` 后默认停止旧颜色实例，降低常驻内存。
+- 订货政策私有数据恢复到 `/var/www/yuan-academy-shared/data/private/policies`，运行目录只建立软链接。
+
+验证：
+
+- `https://academy.yuanshowroom.cn/login` 返回 `200`。
+- 当前颜色本机 `/login` 返回 `200`。
+- 匿名 `/api/policies` 返回 `401`。
+- `policies.json` 可读取 15 条政策。
+- 服务器 swap 使用为 `0B`，可用内存恢复到约 890Mi。
+
+### 2026-07-23 标签页图标恢复记录
+
+故障现象：浏览器标签页头像/图标不显示。
+
+根因：standalone 部署后图标文件位于运行目录的 `public/`，但 nginx 的 `/favicon.png`、`/apple-icon.png` 规则仍指向旧 `.next/static/../` 路径，导致公网请求返回 `404`。`/favicon.ico` 由 Next 应用兜底返回 `200`，但部分浏览器优先使用 png/apple 图标，因此表现为标签页图标缺失。
+
+处理：更新 `/etc/nginx/static-rules.conf`，将图标 alias 改为：
+
+```nginx
+location = /favicon.ico {
+    alias /var/www/yuan-academy-live/public/favicon.ico;
+}
+
+location = /favicon.png {
+    alias /var/www/yuan-academy-live/public/favicon.png;
+}
+
+location = /apple-icon.png {
+    alias /var/www/yuan-academy-live/public/apple-icon.png;
+}
+```
+
+验证：
+
+- `https://academy.yuanshowroom.cn/favicon.ico` 返回 `200 image/x-icon`。
+- `https://academy.yuanshowroom.cn/favicon.png` 返回 `200 image/png`。
+- `https://academy.yuanshowroom.cn/apple-icon.png` 返回 `200 image/png`。
+- `https://academy.yuanshowroom.cn/login` 返回 `200`。
 
 ### 政策结构化解析示例
 
@@ -231,6 +436,7 @@ bash scripts/deploy-local.sh
 | **登录 500** | 检查 `.env.local` 是否存在，Prisma Client 是否最新 |
 | **退出登录跳错** | 确认 logout API 返回 `307` 而非 `500` |
 | **xattr 警告刷屏** | 本地构建前 `xattr -cr .next` 清除 macOS 扩展属性（脚本已自动处理） |
+| **订货政策数据不存在** | 检查 `data/private/policies/policies.json` 是否存在、JSON 是否含非空数组以及目录/文件权限是否为 `750`/`640`；禁止从公开目录回退读取 |
 
 ## CI/CD 自动部署（GitHub Actions）
 
@@ -238,25 +444,14 @@ bash scripts/deploy-local.sh
 
 #### 第一步：在 GitHub 仓库添加 Secrets
 
-把你的仓库 `vvJ1101/yuan-academy` 的 Settings → Secrets and variables → Actions → New repository secret 添加以下 4 个密钥：
+把你的仓库 `vvJ1101/yuan-academy` 的 Settings → Secrets and variables → Actions → New repository secret 添加以下密钥：
 
 | 密钥名称 | 值（以下面的为准） |
 |----------|----------------|
-| `SERVER_HOST` | `120.79.162.27` |
-| `SERVER_USER` | `root` |
-| `SSH_PRIVATE_KEY` | 下面的私钥（从 `-----BEGIN OPENSSH PRIVATE KEY-----` 到 `-----END OPENSSH PRIVATE KEY-----` 整段复制） |
-| `DEEPSEEK_API_KEY` | 从本地 `.env.local` 复制 |
-| `JWT_SECRET` | `353df428b72a117e3922fb242f79d76f301372ac327d3a2b23cd512a5b6e0da6` |
+| `SERVER_HOST` | 从运维平台获取，不写入仓库 |
+| `SERVER_USER` | 使用最小权限部署账号，不在仓库公开具体值 |
+| `SSH_PRIVATE_KEY` | 新建专用部署密钥，并只保存到 GitHub Actions Secrets |
+| `DEEPSEEK_API_KEY` | 从密码管理器复制到 GitHub Actions Secrets |
+| `JWT_SECRET` | 使用密码生成器创建并保存到 GitHub Actions Secrets |
 
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-
-**SSH 私钥（专用于部署，已在服务器上授权）：**
-```
------BEGIN OPENSSH PRIVATE KEY-----
-b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-QyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FAAAAJh7Wqg8e1qo
-PAAAAAtzc2gtZWQyNTUxOQAAACBaut9BgLBfXCfsMIteo+JuJ0JLfseYkdgtb99PWAq2FA
-AAAEC9hpKFwpsSSQoq+fyhO+uEb2wfhPjBgTyjMGdFnK/xylq630GAsF9cJ+wwi16j4m4n
-Qkt+x5iR2C1v309YCrYUAAAAFWdpdGh1Yi1hY3Rpb25zLWRlcGxveQ==
------END OPENSSH PRIVATE KEY-----
-```
+> 安全要求：私钥、密码和实际环境变量值不得出现在 Markdown、Issue、PR、日志或 Git 历史中。发现泄露后必须立即撤销旧凭据并重新生成；仅删除当前文件内容不能消除历史泄露。

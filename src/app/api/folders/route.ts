@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { getUserAccessibleFolderIds } from '@/lib/permissions/folders'
-import { statSync, readdirSync } from 'fs'
-import { join } from 'path'
 import { getFolderPermission } from '@/lib/permissions/folders'
+import { calculateDocumentStorage } from '@/lib/document-processor'
+import { requirePermission } from '@/lib/permissions/guards'
 
 // GET /api/folders — list folder tree (filtered by user permissions)
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Calculate actual storage usage from disk
-  const storage = calcStorageUsage()
+  const storage = await calculateDocumentStorage()
 
   // Super admin sees everything — all folders get admin permission
   if (session.role === 'super_admin') {
@@ -48,34 +48,23 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ folders, storage })
 }
 
-// ── Calculate actual storage usage from uploads directory ──
-function calcStorageUsage() {
-  try {
-    const uploadsDir = join(process.cwd(), 'public', 'uploads', 'documents')
-    let totalBytes = 0
-    const docDirs = readdirSync(uploadsDir, { withFileTypes: true })
-    for (const dir of docDirs) {
-      if (!dir.isDirectory()) continue
-      try { totalBytes += statSync(join(uploadsDir, dir.name, 'original.docx')).size } catch {}
-    }
-    return { usedBytes: totalBytes, usedGB: +(totalBytes / 1e9).toFixed(1), totalGB: 100, percent: Math.min(99, Math.round((totalBytes / 1e11) * 100)) }
-  } catch { return { usedBytes: 0, usedGB: 0, totalGB: 100, percent: 0 } }
-}
-
 // POST /api/folders — create folder
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'folder.create', '无权新建文件夹')
+  if (!guard.ok) return guard.response
 
   const { name, parentId, companyId, inheritPermissions } = await req.json().catch(() => ({}))
   if (!name) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
   const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
-  const maxSort = parentId
-    ? (await prisma.folder.findFirst({ where: { parentId }, orderBy: { sortOrder: 'desc' }, select: { sortOrder: true } }))?.sortOrder ?? 0
-    : 0
+  // 查询同级文件夹的最大 sortOrder（包括根级 parentId=null 的情况）
+  const maxSortSibling = await prisma.folder.findFirst({
+    where: parentId ? { parentId } : { parentId: null },
+    orderBy: { sortOrder: 'desc' },
+    select: { sortOrder: true },
+  })
+  const maxSort = maxSortSibling?.sortOrder ?? 0
 
   const folder = await prisma.folder.create({
     data: {
@@ -94,15 +83,15 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  prisma.auditLog.create({ data: { userId: session!.id, action: "folder:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ folder }, { status: 201 })
 }
 
 // PUT /api/folders — update folder
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'folder.edit', '无权编辑文件夹')
+  if (!guard.ok) return guard.response
 
   const { id, name, companyId, inheritPermissions } = await req.json().catch(() => ({}))
   if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400 })
@@ -116,15 +105,15 @@ export async function PUT(req: NextRequest) {
   if (inheritPermissions !== undefined) data.inheritPermissions = inheritPermissions
 
   const folder = await prisma.folder.update({ where: { id }, data })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "folder:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ folder })
 }
 
 // DELETE /api/folders — delete folder
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session || (session.role !== 'super_admin' && session.role !== 'dept_admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'folder.delete', '无权删除文件夹')
+  if (!guard.ok) return guard.response
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
@@ -137,5 +126,6 @@ export async function DELETE(req: NextRequest) {
   await prisma.folderPermission.deleteMany({ where: { folderId: id } })
   await prisma.folder.delete({ where: { id } })
 
+  prisma.auditLog.create({ data: { userId: session!.id, action: "folder:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ ok: true })
 }

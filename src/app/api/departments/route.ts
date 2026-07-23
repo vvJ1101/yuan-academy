@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
+import { requirePermission } from '@/lib/permissions/guards'
 
 export const dynamic = 'force-dynamic'
 
-function forbid() { return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-
 export async function GET(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { searchParams } = new URL(req.url)
   const companySlug = searchParams.get('company')
@@ -31,8 +30,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'org.departmentCreate', '无权添加部门')
+  if (!guard.ok) return guard.response
 
   const { name, slug, companyId, description } = await req.json()
   if (!name || !slug || !companyId) return NextResponse.json({ error: 'Name, slug and companyId required' }, { status: 400 })
@@ -50,12 +50,14 @@ export async function POST(req: NextRequest) {
       _count: { select: { users: true } },
     },
   })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "department:create" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(dept, { status: 201 })
 }
 
 export async function PUT(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'org.departmentEdit', '无权编辑部门')
+  if (!guard.ok) return guard.response
 
   const { id, name, slug, companyId, description } = await req.json()
   if (!id) return NextResponse.json({ error: 'Department ID required' }, { status: 400 })
@@ -74,17 +76,20 @@ export async function PUT(req: NextRequest) {
       _count: { select: { users: true } },
     },
   })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "department:update" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json(dept)
 }
 
 export async function DELETE(req: NextRequest) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session?.id || session.role !== 'super_admin') return forbid()
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'org.departmentDelete', '无权删除部门')
+  if (!guard.ok) return guard.response
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'Department ID required' }, { status: 400 })
 
   await prisma.department.delete({ where: { id } })
+  prisma.auditLog.create({ data: { userId: session!.id, action: "department:delete" } }).catch((err: any) => console.error("[AuditLogError]", err))
   return NextResponse.json({ ok: true })
 }

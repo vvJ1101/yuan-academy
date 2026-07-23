@@ -107,6 +107,16 @@
 ### 8. 新依赖必须说明
 - 如果要 `npm install`，必须说明：库的作用、替代方案、构建体积增量。
 
+### 9. 生产部署与运维红线
+- **严格按 `DEPLOY.md` 执行**；任何偏离文档的部署、回滚、重启、目录清理、nginx/PM2 配置修改，必须先向用户说明并取得确认。
+- 生产服务器为低配 2G 级别机器，**不得在生产服务器执行 `npm install`、`npm run build` 或大规模依赖重装**，除非用户明确批准并已准备好控制台重启方案。
+- Academy 生产部署必须使用 Next.js `standalone` 产物：本地/CI 构建，可运行包上传服务器，PM2 运行 `server.js`。
+- 生产常驻只保留当前颜色实例；备用颜色只在部署窗口启动，切换完成后默认停止旧颜色，避免 2G 服务器长期双实例占内存。
+- 私密运行数据不可跟随代码包清理：`.env.local`、`prisma/dev.db`、`public/uploads/`、`/var/www/yuan-academy-shared/data/private/` 必须作为持久数据保留。
+- 订货政策、品牌对接信息等私有业务数据不得放回 `public/`，不得提交 GitHub，不得复制到 `.next/static/`。
+- 生产故障先恢复服务：优先查 nginx upstream、PM2 状态、本机端口健康、私有数据软链接，再做代码级修改。
+- 出现 SSH 握手超时、机器高负载或公网长时间超时时，不得反复发重命令；先轻量探测，必要时请用户从云控制台重启实例。
+
 ---
 
 ## 四、思考与推理约束（怎么想问题）
@@ -117,6 +127,15 @@
 3. 后端逻辑（条件判断/返回值？）
 4. 数据库（数据存没存进去/查错没？）
 5. 外部依赖（API 超时/挂了？）
+
+生产 502 / 无法访问问题额外按以下顺序：
+
+1. nginx upstream 指向哪个端口？
+2. 当前颜色 PM2 是否 online？
+3. 本机 `127.0.0.1:<端口>/login` 是否 200？
+4. 受保护接口匿名访问是否 401？
+5. `data/private` 是否软链接到共享私有目录？
+6. PM2 日志是否存在运行入口、环境变量、数据库路径错误？
 
 ### 2. 改代码前先验证数据
 不确定数据长什么样时，先写查询打印出来看一眼，再改。
@@ -169,9 +188,10 @@
 | **权限体系** | super_admin > dept_admin > editor > viewer |
 | **数据库** | `prisma/dev.db`（SQLite） |
 | **AI 引擎** | DeepSeek API（`DEEPSEEK_API_KEY` 在 `.env.local`） |
-| **部署前** | `npx prisma db push` + `npx tsx scripts/fts-migrate.ts` |
+| **生产部署** | `scripts/deploy-blue-green.sh` 本地构建 standalone，可运行包上传服务器 |
+| **部署前** | 本地 `npm run build`；schema 变更才执行数据库步骤，且先备份 |
 - `src/types/dashboard.ts` — 仪表盘共享类型（StatsData / ASR / UserInfo，6 个组件依赖）
-| **测试账号** | `admin@yuanshowroom.com` / `admin123` |
+| **测试账号** | 从本地安全配置或密码管理器获取，不写入仓库 |
 
 ### 关键目录
 
@@ -188,6 +208,15 @@
 | `public/uploads/documents/` | 上传的文档文件 |
 | `scripts/` | 工具脚本（FTS 迁移、文档导入等） |
 
+### 生产持久数据
+
+| 路径 | 说明 |
+|------|------|
+| `/var/www/yuan-academy-shared/data/private/` | 订货政策、品牌对接信息等私有运行数据共享目录 |
+| `/var/www/yuan-academy/prisma/dev.db` | 生产 SQLite 数据库 |
+| `/var/www/yuan-academy/.env.local` | 生产环境变量，禁止提交 |
+| `/var/www/yuan-academy/public/uploads/` | 用户上传文件 |
+
 ### 运维文档
 
-服务器账号密码、部署流程、重启命令等 → 见 **[DEPLOY.md](DEPLOY.md)**
+部署流程和重启命令 → 见 **[DEPLOY.md](DEPLOY.md)**；服务器凭据必须通过安全渠道获取。

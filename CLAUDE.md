@@ -123,7 +123,7 @@
 2. 核心功能手动操作一遍（登录、提交、查看结果）
 3. API 返回值在命令行验证（curl 测试成功/失败两种入参）
 4. 控制台无报错
-5. 确认后才执行 `scripts/deploy-local.sh`
+5. 确认后才执行 `scripts/deploy-blue-green.sh --activate`
 
 **禁止的行为**：
 - ❌ 只跑 `npm run build` 通过就认为功能正确
@@ -192,9 +192,10 @@
 | **权限体系** | super_admin > dept_admin > editor > viewer |
 | **数据库** | `prisma/dev.db`（SQLite） |
 | **AI 引擎** | DeepSeek API（`DEEPSEEK_API_KEY` 在 `.env.local`） |
-| **部署前** | `npx prisma db push` + `npx tsx scripts/fts-migrate.ts` / 部署: `bash scripts/deploy-local.sh` 或 `git push origin main`（自动 CI/CD） |
+| **生产部署** | `scripts/deploy-blue-green.sh` 本地构建 standalone，可运行包上传服务器 |
+| **部署前** | 本地 `npm run build`；schema 变更才执行数据库步骤，且先备份 |
 - `src/types/dashboard.ts` — 仪表盘共享类型（StatsData / ASR / UserInfo，6 个组件依赖）
-| **测试账号** | `admin@yuanshowroom.com` / `admin123` |
+| **测试账号** | 从本地安全配置或密码管理器获取，不写入仓库 |
 
 ### 关键目录
 
@@ -214,29 +215,29 @@
 | `src/api/` | 前端 API 客户端（axios + 请求拦截器） |
 | `src/components/internal/permissions-management/` | 角色权限管理页面 |
 | `src/components/internal/Perm.tsx` | 按钮级权限组件 `<Perm code="xxx">` |
-| `public/data/` | 静态数据文件（policies.json, policy-layouts.json 等） |
-| `public/showroom/data/` | 订货政策核心数据（**policies.json** = 品牌列表 + 阶梯规则，**policies.updated.json** = 更新时间戳） |
-| `public/showroom/data/` | 政策 JSON 数据（policies.json, policies.updated.json） |
+| `public/data/` | 非私密静态数据；不得存放订货政策运行数据 |
+| `/var/www/yuan-academy-shared/data/private/` | 生产私有业务数据共享目录（订货政策、品牌对接信息等，不提交 Git） |
 | `public/uploads/documents/` | 上传的文档文件 |
 | `scripts/` | 工具脚本（FTS 迁移、文档导入等） |
 
 ### 订货政策系统架构
 
-**品牌卡片列表** `/internal/policy`，数据源 `public/showroom/data/policies.json`（14 品牌，11 字段）。
+**品牌卡片列表** `/internal/policy`，生产数据源为 `/var/www/yuan-academy-shared/data/private/policies/policies.json`；运行目录 `data/private` 只做软链接。
 
 页面功能：
 - 搜索/类目筛选/国家筛选，排序切换
 - 点击品牌卡片展开，查看阶梯表格 + 补充说明
 - 管理员可编辑/添加/删除/导出 Excel
 
-> ⚠️ **数据文件警告**：以下文件是订货政策的业务数据源，**禁止删除**：
-> - `public/showroom/data/policies.json` — 品牌列表 + 阶梯规则（API 写入，页面读取）
-> - `public/showroom/data/policies.updated.json` — 更新时间戳（含 updatedAt / updatedBy）
-> - `public/data/policies.json` — 同上，双目录同步
-> - `public/data/policies.updated.json` — 同上，双目录同步
+> ⚠️ **数据文件警告**：订货政策是私有业务数据，禁止放回 `public/`、`.next/static/` 或提交 GitHub。
 > 
-> 如需恢复：`git checkout HEAD -- public/showroom/data/policies.json public/data/policies.json`
-> 如果政策列表页为空，优先检查这些文件是否存在。
+> 生产标准路径：
+> - `/var/www/yuan-academy-shared/data/private/policies/policies.json`
+> - `/var/www/yuan-academy-shared/data/private/policies/policies.updated.json`
+> - `/var/www/yuan-academy-shared/data/private/policies/policies.backup.json`
+> - `/var/www/yuan-academy-shared/data/private/policies/订货政策-上传模板.xlsx`
+>
+> 如果政策列表页为空，优先检查共享私有目录和 `/var/www/yuan-academy/data/private` 软链接，不得从公开目录临时回退读取。
 
 **关键 API**：
 | 端点 | 方法 | 用途 |
@@ -248,23 +249,22 @@
 **关键文件**：
 - `src/app/internal/policy/page.tsx` — 品牌卡片列表页，含 `PolicyDetailTable` 组件（阶梯表格 + 补充说明 + 复制按钮）
 - `src/lib/policy-parser.ts` — 规则驱动文本解析器，`parsePolicyText()` 返回 `{ orderRule, tiers[], supplementaryNotes[] }`
-- `public/showroom/data/policies.json` — 数据源
-- `public/showroom/data/policies.updated.json` — 更新时间戳（`{ updatedAt }`）
+- `data/private/policies/policies.json` — 本地私有数据源；生产由共享目录软链接提供
+- `data/private/policies/policies.updated.json` — 更新时间戳（`{ updatedAt }`）
 
 ### 运维文档
 
-服务器账号密码、部署流程、重启命令等 → 见 **[DEPLOY.md](DEPLOY.md)**
+部署流程和重启命令 → 见 **[DEPLOY.md](DEPLOY.md)**；服务器凭据必须通过安全渠道获取。
 
 
 ### CI/CD 自动部署（GitHub Actions）
 
-项目已配置 GitHub Actions 自动部署流程，当你推送到 `main` 分支时自动触发：
-1. **Build** — 服务器上执行 `npm run build`（生产环境）
-2. **Deploy** — 构建产物自动部署到生产服务器
+旧 CI/CD 文档可能仍描述“服务器上执行 `npm run build`”。当前生产强制使用 standalone 轻量部署：构建在本地或 CI 完成，服务器只接收可运行包，不执行 `npm install` 或 `npm run build`。
 
 相关文件：
 - `.github/workflows/deploy.yml` — GitHub Actions 工作流定义
-- `scripts/deploy-local.sh` — 本地手动部署脚本（备用）
+- `scripts/deploy-blue-green.sh` — 当前推荐部署脚本
+- `scripts/deploy-local.sh` — 旧 `.next` 部署脚本，仅作历史备用，不作为生产首选
 
 > 如果改用 `git push origin main` 自动触发部署，确保仓库 Settings → Secrets and variables → Actions 已正确配置以下 Secrets：
 > `SERVER_HOST`、`SERVER_USER`、`SSH_PRIVATE_KEY`、`DEEPSEEK_API_KEY`、`JWT_SECRET
@@ -275,7 +275,7 @@
 
 如果其他 Codex 会话需要处理本项目，请让它们阅读本文件的全部内容后开始工作。  
 部署相关的命令链、服务器信息、回滚流程在 `DEPLOY.md` 中，务必一并引用。
-注意：`ecosystem.config.js`（PM2 配置）和 `public/` 下的静态文件不会随 `.next/` 自动部署，有改动时需手动 scp 或并入部署脚本。
+注意：生产 PM2 运行 standalone `server.js`；私有数据、数据库、上传文件和 `.env.local` 都是持久数据，不随部署包覆盖。
 
 ```bash
 # 其他 Codex 会话启动时应读取的文件清单

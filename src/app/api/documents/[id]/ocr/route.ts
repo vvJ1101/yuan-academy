@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma, getSessionFromCookies } from '@/lib/auth'
 import { ocrDocumentImages } from '@/lib/ocr'
+import { requirePermission } from '@/lib/permissions/guards'
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = getSessionFromCookies(req.headers.get('cookie'))
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  if (session.role !== 'super_admin' && session.role !== 'dept_admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getSessionFromCookies(req.headers.get('cookie'))
+  const guard = await requirePermission(session, 'document.ocr', '你没有 OCR 识别文档的权限')
+  if (!guard.ok) return guard.response
 
   const doc = await prisma.document.findUnique({
-    where: { id: params.id },
+    where: { id: (await params).id },
     select: { id: true, title: true, extractedJson: true },
   })
   if (!doc) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -18,7 +17,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // Run OCR on all images in the document's upload directory
   let ocrResults: any[] = []
   try {
-    ocrResults = await ocrDocumentImages(params.id)
+    ocrResults = await ocrDocumentImages((await params).id)
   } catch (err: any) {
     return NextResponse.json({ error: `OCR 失败: ${err.message || '未知错误'}` }, { status: 500 })
   }
@@ -56,20 +55,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   extracted.ocrAt = new Date().toISOString()
 
   await prisma.document.update({
-    where: { id: params.id },
+    where: { id: (await params).id },
     data: { extractedJson: JSON.stringify(extracted) },
   })
 
   // Append OCR text to fullContent for FTS5 searchability
   if (ocrTexts.length > 0) {
     const current = await prisma.document.findUnique({
-      where: { id: params.id },
+      where: { id: (await params).id },
       select: { fullContent: true },
     })
     const ocrAppendix = '\n\n---\n## 图片 OCR 识别文本\n\n' + ocrTexts.map((t, i) => `**图片 ${i + 1}**: ${t}`).join('\n\n')
     const updatedContent = (current?.fullContent || '') + ocrAppendix
     await prisma.document.update({
-      where: { id: params.id },
+      where: { id: (await params).id },
       data: { fullContent: updatedContent.substring(0, 100000) },
     })
   }
