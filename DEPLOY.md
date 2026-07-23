@@ -36,6 +36,7 @@ Academy 已切换为轻量 standalone 部署。生产服务器内存有限，部
 5. 订货政策等私有数据固定保存在 `/var/www/yuan-academy-shared/data/private`，颜色目录只建立软链接。
 6. `.env.local`、`prisma/dev.db`、`public/uploads/`、共享私有数据目录不得被 rsync、tar 解压或清理命令覆盖。
 7. 每次部署后必须验证：公网 `/login=200`，本机当前端口 `/login=200`，匿名 `/api/policies=401`，订货政策 JSON 非空。
+8. nginx 静态图标规则必须指向 live 目录的 `public/`：`/favicon.ico`、`/favicon.png`、`/apple-icon.png` 不得继续指向旧 `.next/static/../` 路径。
 
 ### 前置条件
 - 本地已安装 `scp` 和 `tar`
@@ -360,6 +361,35 @@ ssh root@120.79.162.27 '
 - 匿名 `/api/policies` 返回 `401`。
 - `policies.json` 可读取 15 条政策。
 - 服务器 swap 使用为 `0B`，可用内存恢复到约 890Mi。
+
+### 2026-07-23 标签页图标恢复记录
+
+故障现象：浏览器标签页头像/图标不显示。
+
+根因：standalone 部署后图标文件位于运行目录的 `public/`，但 nginx 的 `/favicon.png`、`/apple-icon.png` 规则仍指向旧 `.next/static/../` 路径，导致公网请求返回 `404`。`/favicon.ico` 由 Next 应用兜底返回 `200`，但部分浏览器优先使用 png/apple 图标，因此表现为标签页图标缺失。
+
+处理：更新 `/etc/nginx/static-rules.conf`，将图标 alias 改为：
+
+```nginx
+location = /favicon.ico {
+    alias /var/www/yuan-academy-live/public/favicon.ico;
+}
+
+location = /favicon.png {
+    alias /var/www/yuan-academy-live/public/favicon.png;
+}
+
+location = /apple-icon.png {
+    alias /var/www/yuan-academy-live/public/apple-icon.png;
+}
+```
+
+验证：
+
+- `https://academy.yuanshowroom.cn/favicon.ico` 返回 `200 image/x-icon`。
+- `https://academy.yuanshowroom.cn/favicon.png` 返回 `200 image/png`。
+- `https://academy.yuanshowroom.cn/apple-icon.png` 返回 `200 image/png`。
+- `https://academy.yuanshowroom.cn/login` 返回 `200`。
 
 ### 政策结构化解析示例
 
