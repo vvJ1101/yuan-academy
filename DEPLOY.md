@@ -181,6 +181,7 @@ ssh root@120.79.162.27 "
 - 切换时会同步更新 `/var/www/yuan-academy-live` 软链接，nginx 静态资源和上传文件应读取该 live 目录，避免 HTML 与 CSS/JS 构建版本不一致。
 - 默认不在低配生产机现场执行 `npm install`。依赖由本地 `.next/standalone` 产物携带。
 - `--activate` 后默认停止旧颜色 PM2 进程，只保留当前线上颜色，降低 2G 服务器常驻内存压力；如需临时保留旧颜色，执行时设置 `KEEP_OLD_AFTER_ACTIVATE=1`。
+- 订货政策等私有运行数据固定保存在 `/var/www/yuan-academy-shared/data/private`，颜色目录只建立软链接，避免部署清理运行目录时断开数据。
 
 常用命令：
 
@@ -200,7 +201,7 @@ bash scripts/deploy-blue-green.sh --activate
 一次性服务器初始化要求：
 
 1. 创建 `/var/www/yuan-academy-blue` 和 `/var/www/yuan-academy-green` 两套运行目录。
-2. 两套目录共用同一个 `.env.local`、`prisma/dev.db` 和 `data/private/`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
+2. 两套目录共用同一个 `.env.local`、`prisma/dev.db`，私有运行数据统一放在 `/var/www/yuan-academy-shared/data/private`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
 3. 创建 `/var/www/yuan-academy-live` 软链接指向当前颜色目录；nginx 的上传目录和 `/_next/static` 静态资源都读取 live 目录。
 4. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
 5. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理，但默认只让当前颜色常驻运行。

@@ -7,6 +7,7 @@ DOMAIN="${DOMAIN:-https://academy.yuanshowroom.cn}"
 BASE_DIR="${BASE_DIR:-/var/www}"
 STATE_FILE="${STATE_FILE:-/var/www/yuan-academy-current}"
 LIVE_DIR="${LIVE_DIR:-/var/www/yuan-academy-live}"
+SHARED_PRIVATE_DIR="${SHARED_PRIVATE_DIR:-/var/www/yuan-academy-shared/data/private}"
 NGINX_UPSTREAM_FILE="${NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/yuan-academy-upstream.conf}"
 BLUE_PORT="${BLUE_PORT:-3001}"
 GREEN_PORT="${GREEN_PORT:-3003}"
@@ -31,6 +32,7 @@ Environment overrides:
   BASE_DIR=/var/www
   STATE_FILE=/var/www/yuan-academy-current
   LIVE_DIR=/var/www/yuan-academy-live
+  SHARED_PRIVATE_DIR=/var/www/yuan-academy-shared/data/private
   NGINX_UPSTREAM_FILE=/etc/nginx/conf.d/yuan-academy-upstream.conf
   BLUE_PORT=3001
   GREEN_PORT=3003
@@ -83,6 +85,7 @@ if [ "$MODE" = "dry-run" ]; then
     echo 'Current state file:' '$STATE_FILE'
     echo 'Current color:' '$CURRENT_COLOR'
     echo 'Live dir link:' \$(readlink -f '$LIVE_DIR' 2>/dev/null || echo missing)
+    echo 'Shared private dir:' \$(test -d '$SHARED_PRIVATE_DIR' && echo present || echo missing)
     echo 'Target dir exists:' \$(test -d '$TARGET_DIR' && echo yes || echo no)
     echo 'Nginx upstream file exists:' \$(test -f '$NGINX_UPSTREAM_FILE' && echo yes || echo no)
     pm2 status '$APP_NAME' '$APP_NAME-blue' '$APP_NAME-green' 2>/dev/null || true
@@ -142,9 +145,16 @@ ssh "$SERVER" "
     fi
   fi
   if [ -d '$CURRENT_DIR/data/private' ]; then
+    mkdir -p \$(dirname '$SHARED_PRIVATE_DIR')
+    if [ ! -e '$SHARED_PRIVATE_DIR' ]; then
+      cp -a '$CURRENT_DIR/data/private' '$SHARED_PRIVATE_DIR'
+    fi
+  fi
+  if [ -d '$SHARED_PRIVATE_DIR' ]; then
     mkdir -p data
-    if [ ! -e data/private ] || [ \"\$(readlink -f data/private 2>/dev/null || true)\" != \"\$(readlink -f '$CURRENT_DIR/data/private')\" ]; then
-      ln -sfn '$CURRENT_DIR/data/private' data/private
+    if [ ! -e data/private ] || [ \"\$(readlink -f data/private 2>/dev/null || true)\" != \"\$(readlink -f '$SHARED_PRIVATE_DIR')\" ]; then
+      rm -rf data/private
+      ln -s '$SHARED_PRIVATE_DIR' data/private
     fi
   fi
   if [ -d '$CURRENT_DIR/public/uploads' ]; then
