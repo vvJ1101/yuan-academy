@@ -167,9 +167,9 @@ ssh root@120.79.162.27 "
 
 生产部署优先使用蓝绿脚本；如果网站已经不可用，优先恢复服务，再按备份和 upstream 状态回滚。
 
-### 蓝绿部署脚本（试运行/预部署）
+### 轻量 standalone 蓝绿部署脚本（试运行/预部署）
 
-当前已提供蓝绿部署脚手架：`scripts/deploy-blue-green.sh`。它的目标是先把新版本部署到备用颜色目录并单独健康检查，确认可用后再切换 nginx 流量。
+当前部署脚本：`scripts/deploy-blue-green.sh`。它在本地构建 Next.js standalone 产物，只把可运行包上传到服务器；服务器不再执行 `npm install`、不再依赖完整源码目录和 `node_modules/.bin/next`。
 
 安全约束：
 
@@ -179,7 +179,8 @@ ssh root@120.79.162.27 "
 - `--activate` 前要求 nginx 已经使用 `yuan_academy_upstream` upstream；如果服务器还没做一次性 nginx 初始化，脚本会拒绝切换。
 - 脚本会排除 `.env*`、`prisma/dev.db*`、`public/uploads/`、`data/private/`，避免把密钥、数据库、上传文件或私有政策数据覆盖到 Git/构建包同步范围。
 - 切换时会同步更新 `/var/www/yuan-academy-live` 软链接，nginx 静态资源和上传文件应读取该 live 目录，避免 HTML 与 CSS/JS 构建版本不一致。
-- 默认复用当前线上 `node_modules`，不在低配生产机现场执行 `npm install`；如确实有依赖变化，再显式设置 `INSTALL_DEPS=1`。
+- 默认不在低配生产机现场执行 `npm install`。依赖由本地 `.next/standalone` 产物携带。
+- `--activate` 后默认停止旧颜色 PM2 进程，只保留当前线上颜色，降低 2G 服务器常驻内存压力；如需临时保留旧颜色，执行时设置 `KEEP_OLD_AFTER_ACTIVATE=1`。
 
 常用命令：
 
@@ -202,7 +203,7 @@ bash scripts/deploy-blue-green.sh --activate
 2. 两套目录共用同一个 `.env.local`、`prisma/dev.db` 和 `data/private/`，避免切换版本时丢失登录密钥、业务数据和私有政策数据。
 3. 创建 `/var/www/yuan-academy-live` 软链接指向当前颜色目录；nginx 的上传目录和 `/_next/static` 静态资源都读取 live 目录。
 4. nginx 站点配置代理到 `yuan_academy_upstream`，upstream 定义文件使用 `/etc/nginx/conf.d/yuan-academy-upstream.conf`。
-5. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理。
+5. PM2 进程使用 `yuan-academy-blue`、`yuan-academy-green` 两个名字管理，但默认只让当前颜色常驻运行。
 
 回滚方式：
 

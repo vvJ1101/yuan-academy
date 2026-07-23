@@ -11,6 +11,7 @@ NGINX_UPSTREAM_FILE="${NGINX_UPSTREAM_FILE:-/etc/nginx/conf.d/yuan-academy-upstr
 BLUE_PORT="${BLUE_PORT:-3001}"
 GREEN_PORT="${GREEN_PORT:-3003}"
 INSTALL_DEPS="${INSTALL_DEPS:-0}"
+KEEP_OLD_AFTER_ACTIVATE="${KEEP_OLD_AFTER_ACTIVATE:-0}"
 MODE="dry-run"
 
 usage() {
@@ -34,6 +35,7 @@ Environment overrides:
   BLUE_PORT=3001
   GREEN_PORT=3003
   INSTALL_DEPS=0
+  KEEP_OLD_AFTER_ACTIVATE=0
 USAGE
 }
 
@@ -97,21 +99,19 @@ BUILD_ID="$(cat .next/BUILD_ID)"
 echo "  → BUILD_ID: $BUILD_ID"
 
 echo "📦 [2/7] Package build..."
-BUILD_TAR="/tmp/next-build-$BUILD_ID.tar"
-tar cf "$BUILD_TAR" --no-xattr --no-acl --exclude='*.map' -C .next .
+BUILD_TAR="/tmp/yuan-academy-standalone-$BUILD_ID.tar"
+RELEASE_DIR="/tmp/yuan-academy-standalone-$BUILD_ID"
+rm -rf "$RELEASE_DIR"
+mkdir -p "$RELEASE_DIR/.next"
+cp -R .next/standalone/. "$RELEASE_DIR/"
+cp -R .next/static "$RELEASE_DIR/.next/static"
+rsync -a --exclude='uploads/' public/ "$RELEASE_DIR/public/"
+test -f "$RELEASE_DIR/server.js"
+tar cf "$BUILD_TAR" --no-xattr --no-acl --exclude='*.map' -C "$RELEASE_DIR" .
+rm -rf "$RELEASE_DIR"
 
-echo "📡 [3/7] Sync source to inactive color..."
+echo "📡 [3/7] Prepare inactive color directory..."
 ssh "$SERVER" "mkdir -p '$TARGET_DIR'"
-rsync -az --delete \
-  --exclude='node_modules/' \
-  --exclude='.next/' \
-  --exclude='.git/' \
-  --exclude='prisma/dev.db*' \
-  --exclude='public/uploads/' \
-  --exclude='data/private/' \
-  --exclude='.env*' \
-  --exclude='screenlog*' \
-  ./ "$SERVER:$TARGET_DIR/"
 
 echo "📡 [4/7] Upload build package..."
 scp "$BUILD_TAR" "$SERVER:/tmp/"
@@ -122,51 +122,59 @@ ssh "$SERVER" "
   set -e
   cd '$TARGET_DIR'
 
+  find . -mindepth 1 \
+    ! -name '.env.local' \
+    ! -path './prisma' \
+    ! -path './prisma/dev.db' \
+    ! -path './data' \
+    ! -path './data/private' \
+    ! -path './public' \
+    ! -path './public/uploads' \
+    -exec rm -rf {} + 2>/dev/null || true
+
   if [ -f '$CURRENT_DIR/.env.local' ] && [ ! -e .env.local ]; then
     ln -s '$CURRENT_DIR/.env.local' .env.local
   fi
   mkdir -p prisma data
   if [ -f '$CURRENT_DIR/prisma/dev.db' ]; then
-    ln -sfn '$CURRENT_DIR/prisma/dev.db' prisma/dev.db
+    if [ ! -e prisma/dev.db ] || [ \"\$(readlink -f prisma/dev.db 2>/dev/null || true)\" != \"\$(readlink -f '$CURRENT_DIR/prisma/dev.db')\" ]; then
+      ln -sfn '$CURRENT_DIR/prisma/dev.db' prisma/dev.db
+    fi
   fi
   if [ -d '$CURRENT_DIR/data/private' ]; then
     mkdir -p data
-    ln -sfn '$CURRENT_DIR/data/private' data/private
+    if [ ! -e data/private ] || [ \"\$(readlink -f data/private 2>/dev/null || true)\" != \"\$(readlink -f '$CURRENT_DIR/data/private')\" ]; then
+      ln -sfn '$CURRENT_DIR/data/private' data/private
+    fi
   fi
   if [ -d '$CURRENT_DIR/public/uploads' ]; then
     mkdir -p public
-    ln -sfn '$CURRENT_DIR/public/uploads' public/uploads
+    if [ ! -e public/uploads ] || [ \"\$(readlink -f public/uploads 2>/dev/null || true)\" != \"\$(readlink -f '$CURRENT_DIR/public/uploads')\" ]; then
+      ln -sfn '$CURRENT_DIR/public/uploads' public/uploads
+    fi
   fi
 
-  if [ '$INSTALL_DEPS' = '1' ]; then
-    npm install --omit=dev
-  elif [ -d '$CURRENT_DIR/node_modules' ]; then
-    ln -sfn '$CURRENT_DIR/node_modules' node_modules
-  else
-    npm install --omit=dev
-  fi
-  npx prisma generate
-
-  rm -rf .next.new .next.previous
-  mkdir .next.new
-  tar xf '/tmp/next-build-$BUILD_ID.tar' -C .next.new
-  rm '/tmp/next-build-$BUILD_ID.tar'
-  test \"\$(cat .next.new/BUILD_ID)\" = '$BUILD_ID'
-  [ -d .next ] && mv .next .next.previous
-  mv .next.new .next
+  mkdir -p .release-new
+  tar xf '/tmp/yuan-academy-standalone-$BUILD_ID.tar' -C .release-new
+  rm '/tmp/yuan-academy-standalone-$BUILD_ID.tar'
+  test -f .release-new/server.js
+  test \"\$(cat .release-new/.next/BUILD_ID)\" = '$BUILD_ID'
+  cp -a .release-new/. .
+  rm -rf .release-new
 
   cat > ecosystem.$TARGET_COLOR.config.js <<EOF
 module.exports = {
   apps: [{
     name: '$TARGET_PM2',
-    script: './node_modules/.bin/next',
-    args: 'start -p $TARGET_PORT',
+    script: './server.js',
     cwd: '$TARGET_DIR',
     exec_mode: 'fork',
     instances: 1,
     max_memory_restart: '512M',
     env: {
       NODE_ENV: 'production',
+      PORT: '$TARGET_PORT',
+      HOSTNAME: '127.0.0.1',
       NODE_OPTIONS: '--max-old-space-size=512',
     },
     min_uptime: '5s',
@@ -175,6 +183,7 @@ module.exports = {
   }]
 }
 EOF
+  pm2 delete '$TARGET_PM2' >/dev/null 2>&1 || true
   pm2 start ecosystem.$TARGET_COLOR.config.js --update-env
   pm2 save
 "
@@ -215,6 +224,10 @@ EOF
   nginx -t
   nginx -s reload
   echo '$TARGET_COLOR' > '$STATE_FILE'
+  if [ '$KEEP_OLD_AFTER_ACTIVATE' != '1' ]; then
+    pm2 stop '$APP_NAME-$CURRENT_COLOR' >/dev/null 2>&1 || true
+    pm2 save >/dev/null
+  fi
 "
 
 PUBLIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' "$DOMAIN/login" || true)"
